@@ -1,6 +1,14 @@
 import { NextRequest } from 'next/server';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
-import { streamText, tool, stepCountIs, convertToModelMessages, type UIMessage } from 'ai';
+import {
+  streamText,
+  tool,
+  stepCountIs,
+  convertToModelMessages,
+  createUIMessageStream,
+  createUIMessageStreamResponse,
+  type UIMessage,
+} from 'ai';
 import { z } from 'zod';
 import { resolveTicker } from '@/lib/ticker';
 import { fetchSnapshotL1 } from '@/lib/gateway';
@@ -28,6 +36,8 @@ const SYSTEM_PROMPT = `你是 FinBuddy，一名中立、严谨的投资命题核
 输出要求：
 - 引用工具返回的数据时，必须标注该数据的引用号，格式为 [^ref_X]（X 为工具结果中的引用号）。
 - 只允许引用本轮工具真正返回过的引用号，不得自行编造。
+- **推理过程与最终回答一律使用中文**，便于用户理解。
+- 若工具未覆盖用户所问的维度，必须明确声明「本轮工具不含该数据」，不得推测、不得用相近字段替代。
 - 回答使用中文，简洁、高信息密度。`;
 
 export async function POST(req: NextRequest) {
@@ -41,16 +51,24 @@ export async function POST(req: NextRequest) {
       .join(' ') ?? '';
 
   // 合规拦截（关键词层；意图层在 T3 接入 LLM 判断）
+  // 必须以 UI 消息流协议返回，否则 useChat 无法解析（实测发现的协议不一致缺陷）
   const verdict = await detectTradeSeeking(userText);
   if (verdict.blocked) {
-    return new Response(
-      `FinBuddy 是中立投研工具，不提供任何投资建议、买卖指令或收益承诺。投资有风险，决策需独立。
+    const blockMessage = `FinBuddy 是中立投研工具，不提供任何投资建议、买卖指令或收益承诺。投资有风险，决策需独立。
 
 不过，我可以和您一起核验该标的的基本面与关键传闻。您可以这样问我：
 - 「中际旭创的营收与毛利率近期表现如何？」
-- 「市场上有哪些关于它的传闻，官方披露了什么？」`,
-      { headers: { 'Content-Type': 'text/plain; charset=utf-8' } },
-    );
+- 「市场上有哪些关于它的传闻，官方披露了什么？」`;
+
+    const stream = createUIMessageStream({
+      execute: ({ writer }) => {
+        const id = 'compliance-notice';
+        writer.write({ type: 'text-start', id });
+        writer.write({ type: 'text-delta', id, delta: blockMessage });
+        writer.write({ type: 'text-end', id });
+      },
+    });
+    return createUIMessageStreamResponse({ stream });
   }
 
   const refRegistry: RefRegistry = new Map();
