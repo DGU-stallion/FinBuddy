@@ -135,9 +135,90 @@ describe('validateAnalysisOutput', () => {
     expect(v?.detail).toContain('大客户砍单传闻');
   });
 
+  describe('正文必须挂角标（票面：所有事实挂 refId 角标）', () => {
+    const NO_CITE = `【命题重构】
+X 公司业绩强劲。
+
+【支持证据】
+- 营收同比增长。
+
+【反对证据】
+- 现金流承压。
+
+【无法验证项】
+- 客户集中度处于信息真空期，无法核验。
+
+【敏感性测算】
+基于 TTM 营收。`;
+
+    it('工具返回了数据但正文零角标 → no_citations', () => {
+      const r = validateAnalysisOutput(NO_CITE, ctx());
+      const v = r.violations.find((x) => x.code === 'no_citations');
+      expect(v).toBeDefined();
+      expect(v?.detail).toContain('角标');
+    });
+
+    it('本轮工具全部失败（无任何 refId）时，零角标不算违规', () => {
+      // 上游全挂时正文本就无事实可引，此时报违规是假阳性
+      const r = validateAnalysisOutput(NO_CITE, ctx({ refIds: [] }));
+      expect(r.violations.map((x) => x.code)).not.toContain('no_citations');
+    });
+
+    it('挂了合法角标则不报 no_citations', () => {
+      const r = validateAnalysisOutput(CONFORMING, ctx());
+      expect(r.violations.map((x) => x.code)).not.toContain('no_citations');
+    });
+  });
+
   it('真空期已在【无法验证项】中声明时通过', () => {
     const vacuumCtx = ctx({ vacuumSubQuestions: [VACUUM_ITEM] });
     const r = validateAnalysisOutput(CONFORMING, vacuumCtx);
     expect(r.violations).toEqual([]);
+  });
+
+  describe('真空期匹配必须是容错的（真机发现：按检索 keyword 字面匹配会误报）', () => {
+    // iFinD 失败 → vacuum=true，route 用工具调用时的 keyword 作匹配串。
+    // keyword 形如 "客户 订单"（检索用词，空格连接），而模型在【无法验证项】里
+    // 写的是自然语言。按整串字面匹配必然失败 → 每个真空期都误报违规。
+    const KEYWORD_ITEM = { question: '客户订单是否有披露？', keyword: '客户 订单' };
+    const NATURAL_BODY = CONFORMING.replace(
+      /【无法验证项】\n[\s\S]*?\n\n【敏感性测算】/,
+      '【无法验证项】\n- 大客户营收占比未在法定披露中出现，处于信息真空期，无法核验。\n\n【敏感性测算】',
+    );
+
+    it('keyword 的任一实词命中即视为已声明（不要求整串字面出现）', () => {
+      const r = validateAnalysisOutput(NATURAL_BODY, ctx({ vacuumSubQuestions: [KEYWORD_ITEM] }));
+      expect(r.violations.map((v) => v.code)).not.toContain('missing_vacuum_disclosure');
+    });
+
+    it('keyword 的所有实词都没出现时仍然报违规（不放水）', () => {
+      const r = validateAnalysisOutput(
+        CONFORMING.replace(
+          /【无法验证项】\n[\s\S]*?\n\n【敏感性测算】/,
+          '【无法验证项】\n- 存货周转天数无法核验。\n\n【敏感性测算】',
+        ),
+        ctx({ vacuumSubQuestions: [KEYWORD_ITEM] }),
+      );
+      expect(r.violations.map((v) => v.code)).toContain('missing_vacuum_disclosure');
+    });
+
+    it('无 keyword 时退化为按子问题文本匹配', () => {
+      const r = validateAnalysisOutput(NATURAL_BODY, {
+        ...ctx(),
+        vacuumSubQuestions: [{ question: '大客户营收占比是多少？' }],
+      });
+      expect(r.violations.map((v) => v.code)).not.toContain('missing_vacuum_disclosure');
+    });
+
+    it('只提到主题词但未声明"真空/无法核验"状态 → 仍报违规（不得脑补）', () => {
+      // 反例：正文提到"客户"，但把它写成了正常结论，没有说明信息真空期。
+      // 若只按主题词重合判定，这种脑补会被放过 —— 违反 ADR-0001 决策 2。
+      const evasive = CONFORMING.replace(
+        /【无法验证项】\n[\s\S]*?\n\n【敏感性测算】/,
+        '【无法验证项】\n- 客户与订单情况已在公告中有所体现。\n\n【敏感性测算】',
+      );
+      const r = validateAnalysisOutput(evasive, ctx({ vacuumSubQuestions: [KEYWORD_ITEM] }));
+      expect(r.violations.map((v) => v.code)).toContain('missing_vacuum_disclosure');
+    });
   });
 });

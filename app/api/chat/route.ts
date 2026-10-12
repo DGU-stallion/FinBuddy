@@ -33,7 +33,7 @@ import {
 import { sanitizeFollowUps } from '@/lib/followups';
 import { validateAnalysisOutput } from '@/lib/output-contract';
 import { checkCitations } from '@/lib/citations';
-import { buildOrchestrationSteps, refKind } from '@/lib/orchestration';
+import { buildOrchestrationSteps, refKind, extractSubjectHint } from '@/lib/orchestration';
 
 // T4 前端消费的 data part 名（route 文件只得导出 HTTP 方法，故不 export 此常量）
 const PART = {
@@ -42,6 +42,7 @@ const PART = {
   refs: 'refs',
   contract: 'contract',
   followups: 'followups',
+  compliance: 'compliance',
 } as const;
 
 export const maxDuration = 60;
@@ -88,6 +89,16 @@ interface PlannedAnalysis {
  * 一律回退到确定性兜底，绝不把失败暴露给用户，也绝不让模型自由发挥三栏。
  */
 async function planAnalysis(userText: string): Promise<PlannedAnalysis> {
+  const fallback = (): PlannedAnalysis => {
+    // 尽量保留用户提到的标的名（绝不猜代码：无法识别时用"该标的"）
+    const subject = extractSubjectHint(userText) ?? '该标的';
+    return {
+      plan: fallbackPlan(subject),
+      followUps: sanitizeFollowUps([], { subject }),
+      fromModel: false,
+    };
+  };
+
   let raw: string;
   try {
     const r = await generateText({
@@ -97,22 +108,19 @@ async function planAnalysis(userText: string): Promise<PlannedAnalysis> {
     });
     raw = r.text;
   } catch {
-    const plan = fallbackPlan('该标的');
-    return { plan, followUps: sanitizeFollowUps([], { subject: '该标的' }), fromModel: false };
+    return fallback();
   }
 
-  const validation = validateAnalysisPlan(parsePlanJson(raw));
-  if (!validation.ok) {
-    const plan = fallbackPlan('该标的');
-    return { plan, followUps: sanitizeFollowUps([], { subject: '该标的' }), fromModel: false };
-  }
+  // 只解析一次，复用给校验与追问抽取（避免重复 parse）
+  const parsed = parsePlanJson(raw);
+  const validation = validateAnalysisPlan(parsed);
+  if (!validation.ok) return fallback();
 
   const plan = validation.plan;
   const subject = subjectFromTags(plan.intentTags);
 
   // 追问模型单独给了一份，此处一并抽出来过确定性过滤
-  const parsed = parsePlanJson(raw) ?? {};
-  const followUps = sanitizeFollowUps(parsed.followUps, { subject });
+  const followUps = sanitizeFollowUps(parsed?.followUps, { subject });
 
   return { plan, followUps, fromModel: true };
 }
@@ -133,9 +141,13 @@ export async function POST(req: NextRequest) {
   });
   if (verdict.blocked) {
     // 三种情形文案不同：fail_closed 必须说明“服务不可用”，不得谎称用户索取买卖建议
-    const notice = complianceNotice(verdict.layer === 'fail_closed' ? 'fail_closed' : 'keyword');
+    const layer = verdict.layer === 'fail_closed' ? 'fail_closed' : verdict.layer ?? 'keyword';
+    const notice = complianceNotice(layer === 'fail_closed' ? 'fail_closed' : 'keyword');
     const stream = createUIMessageStream({
       execute: ({ writer }) => {
+        // 机器可读信号：合规测试集与 T4 前端据此区分"真拦截"与"服务降级兜底"，
+        // 不靠嗅探文案字符串（改文案会静默失效 —— code-review Spec 轴发现）。
+        writer.write({ type: 'data-compliance', id: PART.compliance, data: { layer } });
         const id = 'compliance-notice';
         writer.write({ type: 'text-start', id });
         writer.write({ type: 'text-delta', id, delta: notice });

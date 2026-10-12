@@ -2,11 +2,13 @@
  * Seam 5: 输出契约校验（T3「强制三栏输出」「无买卖结论」「降级与真空期声明」）
  *
  * 设计要点：
- * - 契约校验是模型成稿之后的**最后一道确定性防线**。它不做语义判断，
- *   只做可机械判定的结构检查，违规时上层追加确定性修复块。
+ * - 契约校验是模型成稿之后的**最后一道确定性防线**：它只做可机械判定的
+ *   结构检查，**只负责发现与报告**。修复与强制由 T4 前端（角标灰标、
+ *   降级/真空期角标）与上层策略决定：本模块不修改正文。
  * - 三栏必须存在且内容非空（占位符"无/暂无/待补充"视为空 —— 三栏不得糊弄）。
  * - 输出侧买卖语言扫描复用 lib/analysis.ts（与输入侧 lib/compliance.ts 互补）。
  * - 角标校验复用 lib/citations.ts（与 T4 前端同一实现，避免规则漂移）。
+ * - 工具确实返回了数据时，正文必须至少挂一个角标：否则结论无法回溯到原始字段。
  * - L2 降级必须显式声明"非实时"+ 抓取日期；L3 真空期子问题必须在
  *   【无法验证项】里被点名（ADR-0001 决策 2：不得脑补）。
  */
@@ -19,6 +21,25 @@ export const REQUIRED_SECTIONS = ['命题重构', '支持证据', '反对证据'
 
 /** 视为"空栏"的占位符（模型偷懒时的常见写法）。 */
 const PLACEHOLDER_RE = /^(无|暂无|没有|待补充|待核验|n\/?a|none|-+|—+|。|\.)$/i;
+
+/**
+ * 真空期状态词：出现其一才算如实声明了"这里查不到"。
+ * 防止模型把信息真空期写成正常结论（ADR-0001 决策 2：LLM 不得翻案）。
+ */
+const VACUUM_STATE_MARKERS = [
+  '信息真空期',
+  '真空期',
+  '无法核验',
+  '无法验证',
+  '未检索到',
+  '检索未返回',
+  '检索为空',
+  '未返回结果',
+  '无检索结果',
+  '未披露',
+  '未查询到',
+  '查无',
+];
 
 export interface FallbackRef {
   refId: string;
@@ -46,6 +67,7 @@ export type ViolationCode =
   | 'shallow_placeholder'
   | 'trade_conclusion'
   | 'fabricated_citation'
+  | 'no_citations'
   | 'missing_fallback_disclosure'
   | 'missing_vacuum_disclosure';
 
@@ -124,6 +146,15 @@ export function validateAnalysisOutput(text: string, ctx: OutputContext): Output
     });
   }
 
+  // 3b. 工具确实返回了数据时，正文必须至少挂一个角标（结论必须能回溯到字段）。
+  // 反向情形（工具全挂、无任何 refId）不报违规：那正文本就无事实可引。
+  if (!cites.hasAny && ctx.refIds.length > 0) {
+    violations.push({
+      code: 'no_citations',
+      detail: '工具已返回数据，但正文未挂任何 [^ref_X] 角标，结论无法回溯到原始字段',
+    });
+  }
+
   // 4. L2 降级必须显式声明"非实时" + 抓取日期
   for (const fb of ctx.fallbackRefs) {
     const hasRealtimeDisclaimer = text.includes('非实时');
@@ -139,10 +170,7 @@ export function validateAnalysisOutput(text: string, ctx: OutputContext): Output
   // 5. 真空期子问题必须在【无法验证项】里被点名（不得脑补为结论）
   const unverifiable = extractSection(text, '无法验证项') ?? '';
   for (const vq of ctx.vacuumSubQuestions) {
-    const named = vq.keyword
-      ? unverifiable.includes(vq.keyword)
-      : unverifiable.includes(vq.question);
-    if (!named) {
+    if (!isVacuumDeclared(unverifiable, vq)) {
       violations.push({
         code: 'missing_vacuum_disclosure',
         detail: `信息真空期子问题未在【无法验证项】中说明：${vq.question}`,
@@ -151,4 +179,66 @@ export function validateAnalysisOutput(text: string, ctx: OutputContext): Output
   }
 
   return { ok: violations.length === 0, violations };
+}
+
+/**
+ * 真空期是否已在【无法验证项】中被说明。
+ *
+ * 两个条件都满足才算已声明（ADR-0001 决策 2：不得脑补）：
+ *  1. **提到了该子问题的主题**：不要求整串字面匹配 —— 真机发现检索 keyword
+ *     形如 "客户 订单"（空格连接的检索用词），而模型写的是自然语言，
+ *     整串匹配必然误报。改用最长公共子串，只要有一段足够长的重合即可。
+ *  2. **声明了真空期状态**：必须出现"真空/无法核验/未披露/无结果"这类状态词。
+ *     否则模型可以把真空期写成正常结论（"客户与订单情况已在公告中有所体现"），
+ *     主题词重合却把脑补伪装成已声明。
+ *
+ * 注意：这是"是否如实声明"的机械判定，不是语义判定。宁可略宽松地认主题词，
+ * 也不能因此放过未声明真空期的脑补（假负面比假阳性危险得多）。
+ */
+function isVacuumDeclared(
+  unverifiable: string,
+  vq: { question: string; keyword?: string },
+): boolean {
+  return vacuumStateDeclared(unverifiable) && vacuumTopicMentioned(unverifiable, vq);
+}
+
+/** 是否显式声明了"这里查不到"的状态。 */
+function vacuumStateDeclared(unverifiable: string): boolean {
+  return VACUUM_STATE_MARKERS.some((m) => unverifiable.includes(m));
+}
+
+/** 是否提到了该子问题的主题（容错匹配，不要求整串字面一致）。 */
+function vacuumTopicMentioned(
+  unverifiable: string,
+  vq: { question: string; keyword?: string },
+): boolean {
+  const kw = vq.keyword?.trim();
+  if (kw) {
+    const terms = kw.split(/[\s、,，/|]+/).filter((t) => t.length > 0);
+    if (terms.length > 0 && terms.some((t) => longestCommonSubstring(unverifiable, t) >= 2)) {
+      return true;
+    }
+    // keyword 整串也可能是连续词（无分隔符），补一次整串判定
+    if (longestCommonSubstring(unverifiable, kw) >= 2) return true;
+  }
+  return longestCommonSubstring(unverifiable, vq.question.trim()) >= 3;
+}
+
+/** 两个字符串的最长公共子串长度（中文按 code unit 计）。 */
+function longestCommonSubstring(a: string, b: string): number {
+  if (a === '' || b === '') return 0;
+  let best = 0;
+  // 滚动一维 DP：prev[j] = 以 a[i-1]、b[j-1] 结尾的公共子串长度
+  let prev = new Array<number>(b.length + 1).fill(0);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = new Array<number>(b.length + 1).fill(0);
+    for (let j = 1; j <= b.length; j++) {
+      if (a[i - 1] === b[j - 1]) {
+        cur[j] = prev[j - 1] + 1;
+        if (cur[j] > best) best = cur[j];
+      }
+    }
+    prev = cur;
+  }
+  return best;
 }

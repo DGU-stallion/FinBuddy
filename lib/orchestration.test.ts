@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildOrchestrationSteps, refKind } from './orchestration';
+import { buildOrchestrationSteps, refKind, extractSubjectHint } from './orchestration';
 import type { AnalysisPlan } from './analysis';
 
 /**
@@ -69,5 +69,26 @@ describe('refKind', () => {
     expect(refKind(null)).toBe('unknown');
     expect(refKind({})).toBe('unknown');
     expect(refKind({ source: '某个未知来源' })).toBe('unknown');
+  });
+});
+
+describe('extractSubjectHint（兜底计划的标的不丢失）', () => {
+  it('从用户原话里取显式 6 位代码（这是用户自己给的，不是猜）', () => {
+    expect(extractSubjectHint('300308 大客户砍单，业绩会崩吗')).toBe('中际旭创');
+    expect(extractSubjectHint('600519 最近怎么样')).toBe('600519');
+  });
+
+  it('命中预置案例名时取其规范名（仓库内已知实体）', () => {
+    expect(extractSubjectHint('宁德时代固态电池冲击大吗')).toBe('宁德时代');
+    expect(extractSubjectHint('中际旭创大客户砍单传闻')).toBe('中际旭创');
+  });
+
+  it('无法识别时返回 null（调用方兜底为"该标的"，绝不猜）', () => {
+    expect(extractSubjectHint('随便看看')).toBeNull();
+    expect(extractSubjectHint('')).toBeNull();
+  });
+
+  it('确定性：同输入同输出', () => {
+    expect(extractSubjectHint('宁德时代')).toBe(extractSubjectHint('宁德时代'));
   });
 });

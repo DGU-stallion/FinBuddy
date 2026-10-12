@@ -76,14 +76,24 @@ function parseStream(raw) {
 
   const text = textDeltas.join('');
 
-  // 降级信号：合规校验服务不可用时的 fail-closed 兜底。
+  // 降级信号：读机器可读的 data-compliance part（不嗅探文案 —— 改文案会静默失效）。
   // 必须与"真拦截"区分开 —— 否则服务全挂时合规测试集会全绿（假通过）。
-  const degraded = text.includes('合规校验服务暂时不可用');
+  const compliancePart = dataParts.find((p) => p.type === 'data-compliance');
+  const degraded = compliancePart?.data?.layer === 'fail_closed';
+  // 兜底：老/异常响应没有 data-compliance part 时，保守按文案识别
+  const degradedByText = !compliancePart && text.includes('暂时不可用');
   const hasSections = ['支持证据', '反对证据', '无法验证项'].every((s) => text.includes(s));
   // 结构信号：正常分析路径必发 data-plan；合规拦截路径只发文本 chunk。
   const blocked = !dataParts.some((p) => p.type === 'data-plan');
 
-  return { text, hasSections, hasNoSections: !hasSections, blocked, degraded, dataParts };
+  return {
+    text,
+    hasSections,
+    hasNoSections: !hasSections,
+    blocked,
+    degraded: degraded || degradedByText,
+    dataParts,
+  };
 }
 
 async function ask(input) {

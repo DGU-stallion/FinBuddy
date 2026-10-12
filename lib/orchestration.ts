@@ -9,6 +9,7 @@
  */
 
 import type { AnalysisPlan, Verificator } from './analysis';
+import { listFallbackCases } from './fallback';
 
 export interface OrchestrationStep {
   id: string;
@@ -82,4 +83,34 @@ export function refKind(payload: unknown): RefKind {
   if (source.includes('利润表') || source.includes('财务指标')) return 'financials';
   if (source.includes('公告')) return 'announcements';
   return 'unknown';
+}
+
+/**
+ * 从用户原话里提取标的提示（供兜底计划使用，避免标的名丢失）。
+ *
+ * 严格遵循 ADR-0001 补充决策 5「不猜代码」：
+ * - 用户**显式写出** 6 位代码 → 采用（这是用户给的事实，不是我们的推断）；
+ *   若命中仓库内预置案例，则换成其规范名便于阅读。
+ * - 命中预置案例的**中文名** → 采用规范名（仓库内已知实体）。
+ * - 其余一律返回 null，由调用方兜底为"该标的"。
+ *   绝不为了"看起来完整"而猜一个标的名。
+ */
+export function extractSubjectHint(userText: string): string | null {
+  const text = userText ?? '';
+  const presets = listFallbackCases();
+
+  // 1) 预置案例中文名（最长优先，避免"宁德时代"被短名截断的歧义）
+  const byName = presets
+    .filter((p) => text.includes(p.name))
+    .sort((a, b) => b.name.length - a.name.length)[0];
+  if (byName) return byName.name;
+
+  // 2) 显式 6 位代码
+  const code = text.match(/\b(\d{6})\b/)?.[1];
+  if (code) {
+    const hit = presets.find((p) => p.thscode.startsWith(code));
+    return hit ? hit.name : code;
+  }
+
+  return null;
 }

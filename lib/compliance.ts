@@ -7,8 +7,10 @@
  * - fail-closed：意图判断本身抛错时保守拦截，绝不因模型故障放行违规。
  * - 不误伤研究性问题（实测发现：财务术语中的"买入/卖出"多为名词描述）。
  *
- * 这里只负责"判定是否索取买卖决策"，柔性引导话术由上层 prompt 负责。
+ * 这里只负责"判定是否索取买卖决策"，柔性引导话术见 complianceNotice()。
  */
+
+import { GUARANTEE_TERMS, TRADE_ACTION_TERMS } from './vocabulary';
 
 /** 显式索取自身操作决策的句式——确定为违规，最高优先级。 */
 const TRADE_SEEKING_PATTERNS: RegExp[] = [
@@ -52,24 +54,13 @@ const RESEARCH_CONTEXT_MARKERS = [
   '游资',
 ];
 
-/** 收益承诺 / 杠杆 / 满仓类：无论如何都拦截（不含研究性歧义）。 */
-const ALWAYS_FORBIDDEN = [
-  '稳赚不赔',
-  '保本',
-  '翻倍',
-  '梭哈',
-  '满仓',
-  '杠杆',
-  '加仓',
-  '减仓',
-  '止损',
-  '止盈',
-  '建仓',
-  '割肉',
-  '抄底',
-  '必涨',
-  '必跌',
-];
+/**
+ * 无任何语境歧义的词：一律拦截。
+ *
+ * 操作动词直接取自共享词表（lib/vocabulary.ts），避免两处各自维护而漂移
+ * —— 曾因此漏掉「清仓」。#1 以外的承诺词已含在 GUARANTEE_TERMS 内。
+ */
+const ALWAYS_FORBIDDEN = [...TRADE_ACTION_TERMS, ...GUARANTEE_TERMS];
 
 /** 判断句中的交易动作词是否处于研究性语境。 */
 function isResearchContext(text: string): boolean {

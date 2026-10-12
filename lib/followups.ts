@@ -9,18 +9,18 @@
  * - 数量恒为 3（票面要求）：不足时用确定性兜底补齐，而不是少给。
  */
 
+import { containsTradeAction, containsGuarantee } from './vocabulary';
+
 export const FOLLOWUP_COUNT = 3;
 
-/** 操作向/预测向：索取自身买卖决策或预测股价的语言。 */
+/** 操作向：索取自身买卖决策的语言。 */
 const OPERATIONAL_PATTERNS: RegExp[] = [
   /该不该|要不要|能不能|可不可以/,
   /建议(买入|卖出|加仓|减仓|建仓|清仓)/,
-  /(买入|卖出|加仓|减仓|建仓|清仓|满仓|杠杆|抄底|割肉|梭哈|上车|下车|持有|拿住)/,
   /目标价/,
   /(会|将|要|即将|马上|一定)涨/,
   /(会|将|要|即将|马上|一定)跌/,
   /涨停|跌停/,
-  /稳赚不赔|保本|翻倍|必涨|必跌/,
 ];
 
 /** 核验向标记：证伪 / 下钻 / 对比 三类，与票面例子对齐。 */
@@ -52,6 +52,11 @@ export function isVerificationOriented(question: string): boolean {
   const q = question.trim();
   if (q === '') return false;
   if (OPERATIONAL_PATTERNS.some((re) => re.test(q))) return false;
+  // 共享操作/承诺词表（与输入侧、输出侧单一事实来源）
+  if (containsTradeAction(q) || containsGuarantee(q)) return false;
+  // 「持有/拿住」在追问里也是操作向，但只属于追问侧：
+  // 财务正文中的「控股股东持有 11% 股份」是合法表述，不能进共享词表。
+  if (/持有|拿住/.test(q)) return false;
   return VERIFICATION_MARKERS.some((m) => q.includes(m));
 }
 

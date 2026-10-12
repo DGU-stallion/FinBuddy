@@ -12,6 +12,8 @@
  * 本模块只做"校验与规范化"，不调用模型；模型交互在 app/api/chat/route.ts。
  */
 
+import { containsTradeAction, containsGuarantee } from './vocabulary';
+
 /** 已接入的核验方（对应 route.ts 的三个网关工具）。 */
 export const VERIFICATORS = ['snapshot', 'financials', 'announcements', 'unverifiable'] as const;
 
@@ -68,7 +70,6 @@ const PREDICTION_PATTERNS: Array<[RegExp, string]> = [
   [/建议(买入|卖出)/, '建议买卖'],
   [/建议(加仓|减仓|建仓|清仓)/, '建议调仓'],
   [/立即(买入|卖出|建仓)/, '立即操作'],
-  [/(买入|卖出|加仓|减仓|建仓|清仓|满仓|杠杆|抄底|割肉|梭哈|上车|下车)/, '操作动词'],
 ];
 
 /** 返回命中的预测/操作语言片段；空数组表示该文本可接受。 */
@@ -77,6 +78,10 @@ export function scanPredictionLanguage(text: string): string[] {
   for (const [re, label] of PREDICTION_PATTERNS) {
     if (re.test(text)) hits.push(label);
   }
+  // 共享操作/承诺词表：与输入侧、追问侧保持单一事实来源。
+  // 曾漂移出真实漏洞：止损/止盈 输入侧拦、输出侧放。
+  if (containsTradeAction(text)) hits.push('操作动词');
+  if (containsGuarantee(text)) hits.push('收益承诺');
   return Array.from(new Set(hits));
 }
 
