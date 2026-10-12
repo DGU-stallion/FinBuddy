@@ -6,7 +6,10 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "test:compliance": "node scripts/compliance-suite.mjs"
   },
   "dependencies": {
     "@ai-sdk/openai-compatible": "^1.0.58",

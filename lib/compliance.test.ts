@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { detectTradeSeeking, scanForbiddenPhrases, type ComplianceVerdict } from './compliance';
+import {
+  detectTradeSeeking,
+  scanForbiddenPhrases,
+  complianceNotice,
+  type ComplianceVerdict,
+} from './compliance';
 
 /**
  * Seam 2（可测部分）: 合规拦截的确定性层
@@ -102,5 +107,37 @@ describe('detectTradeSeeking', () => {
     const v = await detectTradeSeeking('北向资金最近在买入中际旭创吗？', { llmJudge });
     expect(called).toBe(true);
     expect(v.blocked).toBe(false);
+  });
+});
+
+describe('complianceNotice', () => {
+  it('关键词/意图层拦截：柔性引导至基本面核验，不粗暴拒答', () => {
+    for (const layer of ['keyword', 'intent'] as const) {
+      const msg = complianceNotice(layer);
+      expect(msg).toContain('不提供任何投资建议');
+      expect(msg).toContain('核验');
+      // 不得输出买卖结论
+      expect(msg).not.toMatch(/建议(买入|卖出)/);
+    }
+  });
+
+  it('fail_closed（合规服务不可用）：不得谎称用户在索取买卖建议', () => {
+    const msg = complianceNotice('fail_closed');
+    // 关键：必须说明是"校验服务不可用"，而不是"你问了买卖建议"
+    expect(msg).toContain('暂时不可用');
+    // 不得断言用户意图（那会误导用户以为自己违规了）
+    expect(msg).not.toContain('不提供任何投资建议、买卖指令或收益承诺');
+  });
+
+  it('fail_closed 文案与拦截文案不同（用户可区分）', () => {
+    // keyword 与 intent 含义相同（都在索取买卖决策），共用文案是预期的；
+    // 关键是 fail_closed 必须与它们不同。
+    expect(complianceNotice('keyword')).toBe(complianceNotice('intent'));
+    expect(complianceNotice('fail_closed')).not.toBe(complianceNotice('keyword'));
+  });
+
+  it('fail_closed 文案明确否认用户违规（不得让用户误以为自己问了违规问题）', () => {
+    const msg = complianceNotice('fail_closed');
+    expect(msg).toContain('不是因为您的问题违规');
   });
 });

@@ -54,3 +54,41 @@ describe('createRefAllocator', () => {
     expect(a.list().map((x) => x.refId)).toEqual([id1, id2]);
   });
 });
+
+describe('createRefAllocator list() 顺序契约', () => {
+  it('乱序登记时 list() 仍按分配顺序返回', () => {
+    const a = createRefAllocator();
+    const r1 = a.next();
+    const r2 = a.next();
+    const r3 = a.next();
+    const r4 = a.next();
+    // 完成顺序（乱序）：2, 4, 3, 1
+    a.register(r2, { v: 2 });
+    a.register(r4, { v: 4 });
+    a.register(r3, { v: 3 });
+    a.register(r1, { v: 1 });
+    expect(a.list().map((x) => x.refId)).toEqual([r1, r2, r3, r4]);
+    expect(a.list().map((x) => (x.payload as { v: number }).v)).toEqual([1, 2, 3, 4]);
+  });
+
+  it('重复 register 同一 refId 不产生重复条目，且保留首次位置', () => {
+    const a = createRefAllocator();
+    const r1 = a.next();
+    const r2 = a.next();
+    a.register(r1, { v: 'first' });
+    a.register(r2, { v: 2 });
+    a.register(r1, { v: 'updated' });
+    expect(a.list().map((x) => x.refId)).toEqual([r1, r2]);
+    expect((a.list()[0].payload as { v: string }).v).toBe('updated');
+  });
+
+  it('只登记未分配过的号也不乱序（不崩）', () => {
+    const a = createRefAllocator();
+    const r1 = a.next();
+    a.register('ref_99', { v: 99 });
+    a.register(r1, { v: 1 });
+    const ids = a.list().map((x) => x.refId);
+    expect(ids).toContain(r1);
+    expect(ids).toContain('ref_99');
+  });
+});

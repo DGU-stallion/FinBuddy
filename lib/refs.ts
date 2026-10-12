@@ -6,6 +6,11 @@
  * 导致角标无法溯源。
  *
  * 修正：用单调递增计数器分配，与登记动作解耦。
+ *
+ * 补充（T3 真机验收发现）：list() 的顺序契约。register() 发生在工具调用**完成**时，
+ * 4 路并发调用完成顺序 = 网络完成顺序，与 next() 的分配顺序不一致，
+ * 实测得到 ref_2, ref_4, ref_3, ref_1 —— 存证抽屉里的引用号会随网络抖动乱序。
+ * 因此 list() 必须按 refId 的**分配序号**排序，而非登记顺序。
  */
 
 export interface RefEntry<T = unknown> {
@@ -42,7 +47,17 @@ export function createRefAllocator<T = unknown>(): RefAllocator<T> {
       return store.get(refId);
     },
     list() {
-      return order.map((refId) => ({ refId, payload: store.get(refId) as T }));
+      // 按分配序号排序，使存证抽屉/角标顺序稳定可预期（不随并发完成顺序抖动）
+      return order
+        .slice()
+        .sort((a, b) => refSeq(a) - refSeq(b))
+        .map((refId) => ({ refId, payload: store.get(refId) as T }));
     },
   };
+}
+
+/** 抽取 refId 的分配序号；非 ref_N 形状的排在最后（保持相对稳定）。 */
+function refSeq(refId: string): number {
+  const m = /^ref_(\d+)$/.exec(refId);
+  return m ? Number(m[1]) : Number.MAX_SAFE_INTEGER;
 }
