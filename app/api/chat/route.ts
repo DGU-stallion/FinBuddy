@@ -34,6 +34,7 @@ import { sanitizeFollowUps } from '@/lib/followups';
 import { validateAnalysisOutput } from '@/lib/output-contract';
 import { checkCitations } from '@/lib/citations';
 import { buildOrchestrationSteps, refKind, extractSubjectHint } from '@/lib/orchestration';
+import { buildContextSummary } from '@/lib/context-summary';
 
 // T4 前端消费的 data part 名（route 文件只得导出 HTTP 方法，故不 export 此常量）
 const PART = {
@@ -88,7 +89,7 @@ interface PlannedAnalysis {
  * 一次非流式轻量调用拿结构化计划。任何失败（超时/解析错/校验不过）
  * 一律回退到确定性兜底，绝不把失败暴露给用户，也绝不让模型自由发挥三栏。
  */
-async function planAnalysis(userText: string): Promise<PlannedAnalysis> {
+async function planAnalysis(userText: string, priorSummary?: string): Promise<PlannedAnalysis> {
   const fallback = (): PlannedAnalysis => {
     // 尽量保留用户提到的标的名（绝不猜代码：无法识别时用"该标的"）
     const subject = extractSubjectHint(userText) ?? '该标的';
@@ -103,7 +104,7 @@ async function planAnalysis(userText: string): Promise<PlannedAnalysis> {
   try {
     const r = await generateText({
       model: deepseek(MODEL_ID),
-      prompt: buildPlanPrompt(userText),
+      prompt: buildPlanPrompt(userText, priorSummary),
       temperature: 0,
     });
     raw = r.text;
@@ -158,7 +159,11 @@ export async function POST(req: NextRequest) {
   }
 
   // 命题重构 + 子问题拆解 + 追问（T3）：失败一律回退确定性兜底，不暴露给用户
-  const { plan, followUps, fromModel } = await planAnalysis(userText);
+  // 多轮上下文（T5）：只带上一轮的「标的 + 已确认事实」结构化摘要，不带完整对话历史。
+  // 从历史 data part 反推，故客户端无需额外配合（spec 交互决策）。先算摘要，
+  // 因为计划阶段也要用它消解指代型追问（否则标签会丢掉标的）。
+  const priorSummary = buildContextSummary(messages);
+  const { plan, followUps, fromModel } = await planAnalysis(userText, priorSummary?.toPromptText());
 
   // 引用号分配器：单调递增，与登记解耦（修复并发下 refId 重复的缺陷）
   const refs = createRefAllocator<unknown>();
@@ -169,7 +174,7 @@ export async function POST(req: NextRequest) {
 
   const result = streamText({
     model: deepseek(MODEL_ID),
-    system: buildSystemPrompt(plan),
+    system: buildSystemPrompt(plan, priorSummary?.toPromptText()),
     messages: await convertToModelMessages(messages),
     stopWhen: stepCountIs(5),
     tools: {

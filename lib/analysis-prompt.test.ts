@@ -133,4 +133,41 @@ describe('buildSystemPrompt', () => {
     const p = buildSystemPrompt(plan);
     expect(p).not.toContain('生成 3 个');
   });
+
+  it('无上一轮摘要时不注入上下文段（首轮）', () => {
+    const p = buildSystemPrompt(plan);
+    expect(p).not.toContain('上一轮');
+  });
+});
+
+describe('buildSystemPrompt · 多轮上下文（T5）', () => {
+  const plan = {
+    reframedClaim: '宁德时代固态电池量产未出现官方确认的重大延期。',
+    intentTags: ['标的: 宁德时代'],
+    subQuestions: [{ question: '公告有无披露？', verificator: 'announcements' as const }],
+  };
+
+  it('注入上一轮结构化摘要（标的 + 已确认事实）', () => {
+    const summary = '【上一轮已确认的结构化结论】\n本轮标的：宁德时代\n已确认事实：\n- [ref_4] 行情快照：宁德时代(300750.SZ)，最新价 298.38 元';
+    const p = buildSystemPrompt(plan, summary);
+    expect(p).toContain('298.38');
+    expect(p).toContain('上一轮');
+  });
+
+  it('注入的是摘要而非完整对话：长正文不应出现在提示词里', () => {
+    const p = buildSystemPrompt(plan, '本轮标的：宁德时代');
+    expect(p.length).toBeLessThan(6000);
+  });
+});
+
+describe('buildPlanPrompt · 多轮上下文（T5）', () => {
+  it('追问时把上一轮标的写进提示词，避免标的多轮漂移', () => {
+    const p = buildPlanPrompt('那它的毛利率呢？', '本轮标的：宁德时代');
+    expect(p).toContain('宁德时代');
+  });
+
+  it('首轮不带摘要时提示词不含上下文段', () => {
+    const p = buildPlanPrompt('宁德时代怎么样');
+    expect(p).not.toContain('本轮标的：');
+  });
 });

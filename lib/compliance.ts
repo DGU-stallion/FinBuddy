@@ -10,7 +10,12 @@
  * 这里只负责"判定是否索取买卖决策"，柔性引导话术见 complianceNotice()。
  */
 
-import { GUARANTEE_TERMS, TRADE_ACTION_TERMS } from './vocabulary';
+import {
+  GUARANTEE_TERMS,
+  TRADE_ACTION_TERMS,
+  AMBIGUOUS_FINANCE_TERMS,
+  containsAmbiguousTradeAction,
+} from './vocabulary';
 
 /** 显式索取自身操作决策的句式——确定为违规，最高优先级。 */
 const TRADE_SEEKING_PATTERNS: RegExp[] = [
@@ -78,9 +83,19 @@ export function scanForbiddenPhrases(text: string): string[] {
   }
   if (hits.length > 0) return Array.from(new Set(hits));
 
-  // 1. 收益承诺 / 杠杆 / 满仓类：无歧义，一律拦截
+  // 1. 收益承诺类：无歧义，一律拦截
   for (const term of ALWAYS_FORBIDDEN) {
     if (text.includes(term)) hits.push(term);
+  }
+  if (hits.length > 0) return Array.from(new Set(hits));
+
+  // 1b. 财务术语歧义词（杠杆/满仓）：需语境消歧
+  // 用户说「经营杠杆高吗」是研究问题；说「加杠杆干进去」是操作指令。
+  // 与输出侧共用同一消歧实现，避免两侧规则漂移。
+  for (const term of AMBIGUOUS_FINANCE_TERMS) {
+    if (!text.includes(term)) continue;
+    // 用整串判定：该词只要有一处是操作含义即命中
+    if (containsAmbiguousTradeAction(text, [term])) hits.push(term);
   }
   if (hits.length > 0) return Array.from(new Set(hits));
 

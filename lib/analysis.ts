@@ -12,7 +12,12 @@
  * 本模块只做"校验与规范化"，不调用模型；模型交互在 app/api/chat/route.ts。
  */
 
-import { containsTradeAction, containsGuarantee } from './vocabulary';
+import {
+  containsTradeAction,
+  containsGuarantee,
+  containsAmbiguousTradeAction,
+  AMBIGUOUS_FINANCE_TERMS,
+} from './vocabulary';
 
 /** 已接入的核验方（对应 route.ts 的三个网关工具）。 */
 export const VERIFICATORS = ['snapshot', 'financials', 'announcements', 'unverifiable'] as const;
@@ -82,6 +87,10 @@ export function scanPredictionLanguage(text: string): string[] {
   // 曾漂移出真实漏洞：止损/止盈 输入侧拦、输出侧放。
   if (containsTradeAction(text)) hits.push('操作动词');
   if (containsGuarantee(text)) hits.push('收益承诺');
+  // 财务术语歧义词（杠杆/满仓）需语境消歧：
+  // T4 真机回归发现 8 次运行 5 次误报，模型写的是「固定成本杠杆」「经营杠杆」，
+  // 属于标准财务分析表述，不是买卖结论。
+  if (containsAmbiguousTradeAction(text, AMBIGUOUS_FINANCE_TERMS)) hits.push('操作动词');
   return Array.from(new Set(hits));
 }
 
@@ -231,9 +240,15 @@ function extractFirstJsonObject(text: string): string | null {
  * 追问在此阶段一并产出：followUps 会经 lib/followups.ts 做确定性核验向
  * 过滤后直接展示（模型生成的更"递进"，确定性过滤保证合规）。
  */
-export function buildPlanPrompt(userText: string): string {
-  return `你是投资命题核验助手的前置分析器。把用户的输入转换成一份结构化的核验计划。
+export function buildPlanPrompt(userText: string, priorSummary?: string): string {
+  // 多轮（T5）：把上一轮的标的带进提示词，避免指代型追问（"那它的毛利率呢"）
+  // 丢标的导致标签漂移。摘要已在 lib/context-summary.ts 里压缩过，不含完整对话。
+  const contextSection = priorSummary
+    ? `\n【上一轮上下文（仅结构化摘要，仅供消解指代，不得当作本轮证据）】\n${priorSummary}\n`
+    : '';
 
+  return `你是投资命题核验助手的前置分析器。把用户的输入转换成一份结构化的核验计划。
+${contextSection}
 用户输入：${userText}
 
 要求：
@@ -263,10 +278,19 @@ export function buildPlanPrompt(userText: string): string {
  * 计划已确认，模型**不再负责拆解**，只负责按子问题调工具并成稿。
  * 追问也不在此处生成（由计划阶段产出并过确定性过滤）。
  */
-export function buildSystemPrompt(plan: AnalysisPlan): string {
+export function buildSystemPrompt(plan: AnalysisPlan, priorSummary?: string): string {
   const subList = plan.subQuestions
     .map((sq, i) => `${i + 1}. ${sq.question}（核验方：${sq.verificator}）`)
     .join('\n');
+
+  // 多轮（T5）：只注入结构化结论摘要（标的 + 已确认事实），不注入完整对话历史。
+  // 明确的措辞约束：摘要是"已确认"的，但新事实仍须重新调工具核验，不得凭记忆陈述。
+  const contextSection = priorSummary
+    ? `
+上一轮的结构化结论摘要（仅供消解指代与避免重复调用；若要引用为新事实，仍须本轮重新调用工具核验）：
+${priorSummary}
+`
+    : '';
 
   return `你是 FinBuddy，一名中立、严谨的投资命题核验助手。
 
@@ -282,6 +306,7 @@ export function buildSystemPrompt(plan: AnalysisPlan): string {
 意图标签：${plan.intentTags.join(' | ')}
 待核验子问题：
 ${subList}
+${contextSection}
 
 输出格式（严格按顺序使用以下 Markdown 分栏，每一栏都不得为空）：
 
