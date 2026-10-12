@@ -3,6 +3,7 @@ name: scout
 description: Fast codebase recon — explores files, finds patterns, maps architecture
 tools: read, grep, find, ls
 model: magpie/workbuddy/glm-5.3
+# 项目级覆盖：本仓库固定走 magpie，避免上游默认的 openrouter 在本机 stalled
 thinking: low
 system-prompt: append
 auto-exit: true

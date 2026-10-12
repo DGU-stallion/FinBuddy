@@ -4,6 +4,7 @@ description: General-purpose worker — reads, writes, and edits code
 tools: read, write, edit, bash, web_search, web_fetch
 subagent_agents: scout, researcher
 model: magpie/workbuddy/glm-5.3
+# 项目级覆盖：本仓库固定走 magpie，避免上游默认的 openrouter 在本机 stalled
 thinking: high
 system-prompt: append
 auto-exit: true
