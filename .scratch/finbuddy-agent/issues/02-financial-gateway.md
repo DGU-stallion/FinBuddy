@@ -4,7 +4,7 @@
 
 **Blocked by:** 01
 
-**Status:** ready-for-agent
+**Status:** done (2026-10-12，真机验证三工具 + 修复 refId 并发重复缺陷)
 
 - [ ] `lookupStockSnapshot(ticker)`：扶摇 `get_a_share_prices_snapshot` + `get_a_share_valuations_snapshot`，返回价格/涨跌幅/PE/PB
 - [ ] `lookupFinancialReport(ticker)`：扶摇 `get_a_share_financials_income_statements`（`period=quarterly`）+ `get_a_share_financials_indicators`（`report={yyyy}-{1|2|3|4}`），返回营业收入、净利润、净利率（`sale_net_interest_ratio`）、毛利率
