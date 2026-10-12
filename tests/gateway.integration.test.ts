@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import fs from 'fs';
 import path from 'path';
 import { resolveTicker } from '../lib/ticker';
-import { fetchSnapshotL1 } from '../lib/gateway';
+import { lookupStockSnapshot } from '../lib/gateway';
 import { formatSnapshotForLLM } from '../lib/format';
 
 // 真机集成测试：需要真实 FUYAO_API_KEY。缺失时跳过（不伪造通过）。
@@ -23,7 +23,7 @@ describe.skipIf(!hasKey)('真机集成：标的解析 → 行情快照 → LLM �
     if (!r.ok) return;
     expect(r.thscode).toBe('300308.SZ');
 
-    const snap = await fetchSnapshotL1(r.thscode, 'ref_1');
+    const snap = await lookupStockSnapshot(r.thscode, 'ref_1');
     expect(snap.data.thscode).toBe('300308.SZ');
     expect(typeof snap.data.last_price).toBe('number');
     expect(snap.data.last_price).toBeGreaterThan(0);

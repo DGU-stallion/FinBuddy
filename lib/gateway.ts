@@ -1,74 +1,43 @@
 /**
- * 金融数据网关（L1 实时层）
+ * 金融数据网关
  *
- * 见 ADR-0001：三源协同 —— 扶摇（行情/财报）、iFinD（公告/新闻）。
- * T1 只实现行情快照的最小可用路径；T2 补齐财报、公告、三级降级。
+ * 三源协同（ADR-0001）：
+ * - 扶摇：行情快照 / 估值 / 利润表 / 财务指标
+ * - iFinD：公告 / 新闻语义检索（扶摇不覆盖）
  *
- * 真实契约（真机验证 2026-10-12）：
- * - 扶摇 MCP 端点 https://fuyao.aicubes.cn/mcp/a-share，认证 X-api-key，JSON-RPC
- * - 行情快照工具 get_a_share_prices_snapshot，入参 thscodes（如 300308.SZ）
- * - 估值快照工具 get_a_share_valuations_snapshot，入参 thscodes
- * - 统一信封 { code, message, request_id, data }
+ * 三级降级（ADR-0001 决策 3）：
+ * - L1 实时（扶摇 / iFinD）
+ * - L2 本地预置存证：仅限预置演示案例，显式标记 isFallback + 抓取日期
+ * - L3 信息真空期：无收录时返回结构化"真空"信号，驱动上层归入【无法验证项】
+ *
+ * 每次成功返回都携带 refId、source、asOf、isFallback（ADR-0002 决策 2）。
  */
 
-import type { SnapshotPayload } from './format';
+import { callFuyaoTool } from './fuyao';
+import { callIfindTool } from './ifind';
+import { sumTTM, type QuarterlyIncome, type RevenueBasis } from './financials';
+import type { SnapshotPayload, FinancialsPayload } from './format';
+import { getFallbackSnapshot, type FallbackRecord } from './fallback';
 
-const FUYAO_MCP = 'https://fuyao.aicubes.cn/mcp/a-share';
-
-interface McpEnvelope<T> {
-  jsonrpc?: string;
-  id?: number;
-  result?: { content?: Array<{ text?: string }>; structuredContent?: unknown };
-  error?: { message: string; code: number };
+/** 可注入的调用器，便于在降级 seam 上测试（默认用真实实现）。 */
+export interface GatewayDeps {
+  fuyao: typeof callFuyaoTool;
+  ifind: typeof callIfindTool;
 }
 
-async function callFuyaoTool<T>(toolName: string, args: Record<string, unknown>): Promise<T> {
-  const apiKey = process.env.FUYAO_API_KEY ?? '';
-  const res = await fetch(FUYAO_MCP, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'application/json, text/event-stream',
-      'X-api-key': apiKey,
-    },
-    body: JSON.stringify({
-      jsonrpc: '2.0',
-      id: 1,
-      method: 'tools/call',
-      params: { name: toolName, arguments: args },
-    }),
-    signal: AbortSignal.timeout(8000),
-  });
+const defaultDeps: GatewayDeps = { fuyao: callFuyaoTool, ifind: callIfindTool };
 
-  if (!res.ok) throw new Error(`扶摇 MCP 返回 HTTP ${res.status}`);
-
-  const env = (await res.json()) as McpEnvelope<T>;
-  if (env.error) throw new Error(`扶摇工具错误：${env.error.message}`);
-
-  // 工具结果可能是 structuredContent 或 content[0].text 里的 JSON 字符串
-  const structured = env.result?.structuredContent;
-  if (structured && typeof structured === 'object') {
-    const sc = structured as { data?: unknown; code?: number; message?: string };
-    if (typeof sc.code === 'number' && sc.code !== 0) {
-      throw new Error(`扶摇业务错误 code=${sc.code} ${sc.message ?? ''}`);
-    }
-    if (sc.data !== undefined) return sc.data as T;
-    return structured as T;
-  }
-
-  const text = env.result?.content?.[0]?.text;
-  if (typeof text === 'string' && text.trim()) {
-    const parsed = JSON.parse(text) as { code?: number; message?: string; data?: unknown };
-    if (typeof parsed.code === 'number' && parsed.code !== 0) {
-      throw new Error(`扶摇业务错误 code=${parsed.code} ${parsed.message ?? ''}`);
-    }
-    return (parsed.data ?? parsed) as T;
-  }
-
-  throw new Error('扶摇返回结构无法识别');
+export interface GatewayMeta {
+  refId: string;
+  source: string;
+  asOf: number;
+  isFallback: boolean;
+  fallbackNote?: string;
 }
 
-interface PricesSnapshotData {
+// ---------- 内部类型（扶摇真实返回结构） ----------
+
+interface PricesData {
   item?: Array<{
     thscode?: string;
     last_price?: number;
@@ -81,45 +50,245 @@ interface ValuationsData {
   item?: Array<{ thscode?: string; name?: string; pe_ttm?: number; pb_mrq?: number }>;
 }
 
-/**
- * L1 实时行情快照。任何一步失败都抛错，由上层决定降级（不静默返回空壳）。
- */
-export async function fetchSnapshotL1(
+interface IncomeData {
+  item?: Array<{
+    fiscal_year?: number;
+    fiscal_period?: string;
+    operating_income?: number;
+    net_profit?: number;
+  }>;
+}
+
+interface IndicatorsData {
+  thscode?: string;
+  report?: string;
+  abilities?: Array<{
+    ability: string;
+    indicators: Array<{ index_id: string; value: string }>;
+  }>;
+}
+
+interface NoticeData {
+  code?: number;
+  msg?: string;
+  data?: string; // JSON 字符串数组
+}
+
+interface NoticeItem {
+  公告标题?: string;
+  公告片段内容?: string;
+  日期?: string;
+  备注?: string;
+}
+
+// ---------- 工具 1：行情快照 ----------
+
+export async function lookupStockSnapshot(
   thscode: string,
   refId: string,
+  deps: GatewayDeps = defaultDeps,
 ): Promise<SnapshotPayload> {
-  const prices = await callFuyaoTool<PricesSnapshotData>('get_a_share_prices_snapshot', {
-    thscodes: thscode,
-  });
-
-  // 估值与行情并行获取，各自允许失败（估值缺失不应让整条行情链路挂掉）
-  let valuations: ValuationsData | null = null;
   try {
-    valuations = await callFuyaoTool<ValuationsData>('get_a_share_valuations_snapshot', {
+    const prices = await deps.fuyao<PricesData>('get_a_share_prices_snapshot', {
       thscodes: thscode,
     });
-  } catch {
-    valuations = null;
+    const p = prices.item?.[0];
+    if (!p) throw new Error(`扶摇未返回 ${thscode} 的行情`);
+
+    let valuations: ValuationsData | null = null;
+    try {
+      valuations = await deps.fuyao<ValuationsData>('get_a_share_valuations_snapshot', {
+        thscodes: thscode,
+      });
+    } catch {
+      valuations = null; // 估值缺失不应让整条行情链路挂掉
+    }
+    const v = valuations?.item?.[0];
+
+    return {
+      refId,
+      source: '扶摇 · 行情/估值快照',
+      asOf: Date.now(),
+      isFallback: false,
+      data: {
+        thscode: p.thscode ?? thscode,
+        name: v?.name,
+        last_price: p.last_price,
+        price_change_ratio_pct: p.price_change_ratio_pct,
+        turnover: p.turnover,
+        pe_ttm: v?.pe_ttm,
+        pb_mrq: v?.pb_mrq,
+      },
+    };
+  } catch (e) {
+    // L2 降级：仅预置案例
+    const fb: FallbackRecord | null = getFallbackSnapshot(thscode);
+    if (fb) {
+      return {
+        refId,
+        source: fb.source,
+        asOf: fb.asOf,
+        isFallback: true,
+        fallbackNote: fb.note,
+        data: fb.snapshot,
+      };
+    }
+    throw e;
   }
+}
 
-  const p = prices.item?.[0];
-  if (!p) throw new Error(`扶摇未返回 ${thscode} 的行情数据`);
+// ---------- 工具 2：财务参数 ----------
 
-  const v = valuations?.item?.[0];
+export interface FinancialsResult extends FinancialsPayload {
+  baseRevenue: number;
+  revenueBasis: RevenueBasis;
+  netMargin?: number;
+  grossMargin?: number;
+  taxRate?: number;
+}
+
+export async function lookupFinancialReport(
+  thscode: string,
+  refId: string,
+  deps: GatewayDeps = defaultDeps,
+): Promise<FinancialsResult> {
+  const income = await deps.fuyao<IncomeData>('get_a_share_financials_income_statements', {
+    thscode,
+    period: 'quarterly',
+    limit: 5,
+  });
+
+  const periods: QuarterlyIncome[] = (income.item ?? []).map((it) => ({
+    fiscalYear: it.fiscal_year ?? 0,
+    fiscalPeriod: it.fiscal_period ?? '',
+    operatingIncome: it.operating_income ?? NaN,
+    netProfit: it.net_profit ?? NaN,
+  }));
+
+  const ttm = sumTTM(periods);
+
+  // 财务指标（净利率/毛利率/税率）单独取；失败不阻断营收链路
+  let netMargin: number | undefined;
+  let grossMargin: number | undefined;
+  let report = periods[0]
+    ? `${periods[0].fiscalYear}-${periods[0].fiscalPeriod.replace('Q', '')}`
+    : undefined;
+
+  try {
+    const latest = periods[0];
+    const reportCode = latest ? `${latest.fiscalYear}-${latest.fiscalPeriod.replace('Q', '')}` : '';
+    if (reportCode) {
+      const ind = await deps.fuyao<IndicatorsData>('get_a_share_financials_indicators', {
+        thscode,
+        report: reportCode,
+      });
+      const flat = (ind.abilities ?? []).flatMap((a) => a.indicators);
+      const pick = (id: string) => {
+        const v = flat.find((x) => x.index_id === id)?.value;
+        const n = v === undefined ? NaN : Number(v);
+        return Number.isFinite(n) ? n : undefined;
+      };
+      netMargin = pick('sale_net_interest_ratio');
+      grossMargin = pick('sale_gross_margin');
+      report = ind.report ?? report;
+    }
+  } catch {
+    // 指标缺失时保留 undefined，由 format 层显式声明"缺失"
+  }
 
   return {
     refId,
-    source: '扶摇 · 行情/估值快照',
+    source: '扶摇 · 利润表/财务指标',
     asOf: Date.now(),
     isFallback: false,
+    baseRevenue: ttm.baseRevenue,
+    revenueBasis: ttm.basis,
+    netMargin,
+    grossMargin,
+    taxRate: 15, // A 股高新技术企业常见优惠税率；口径见 UI 声明
     data: {
-      thscode: p.thscode ?? thscode,
-      name: v?.name,
-      last_price: p.last_price,
-      price_change_ratio_pct: p.price_change_ratio_pct,
-      turnover: p.turnover,
-      pe_ttm: v?.pe_ttm,
-      pb_mrq: v?.pb_mrq,
+      thscode,
+      report,
+      baseRevenue: ttm.baseRevenue,
+      revenueBasis: ttm.basis,
+      netMargin,
+      grossMargin,
+      taxRate: 15,
     },
+  };
+}
+
+// ---------- 工具 3：公告 / 新闻检索 ----------
+
+export interface AnnouncementResult {
+  refId: string;
+  source: string;
+  asOf: number;
+  isFallback: boolean;
+  items: Array<{ title: string; snippet: string; date: string }>;
+  /** 检索为空时为 true —— 驱动上层归入【无法验证项】（ADR-0001 决策 2）。 */
+  vacuum: boolean;
+}
+
+function parseNoticeItems(raw: string | undefined): NoticeItem[] {
+  if (!raw) return [];
+  try {
+    const arr = JSON.parse(raw) as NoticeItem[];
+    return Array.isArray(arr) ? arr : [];
+  } catch {
+    return [];
+  }
+}
+
+function ymd(d: Date): string {
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+export async function searchAnnouncementsAndNews(
+  name: string,
+  keyword: string,
+  refId: string,
+  windowDays = 400,
+  deps: GatewayDeps = defaultDeps,
+): Promise<AnnouncementResult> {
+  const end = new Date();
+  const start = new Date(end.getTime() - windowDays * 24 * 3600 * 1000);
+
+  let res: NoticeData;
+  try {
+    res = await deps.ifind<NoticeData>('news', 'search_notice', {
+      query: `${name} ${keyword}`.trim(),
+      time_start: ymd(start),
+      time_end: ymd(end),
+      size: 5,
+    });
+  } catch {
+    // iFinD 不可用 → L3 信息真空期（不伪造公告）
+    return {
+      refId,
+      source: 'iFinD · 公告检索',
+      asOf: Date.now(),
+      isFallback: false,
+      items: [],
+      vacuum: true,
+    };
+  }
+
+  const items = parseNoticeItems(res.data)
+    .filter((it) => it.公告标题)
+    .map((it) => ({
+      title: it.公告标题 ?? '',
+      snippet: (it.公告片段内容 ?? '').slice(0, 800),
+      date: it.日期 ?? '',
+    }));
+
+  return {
+    refId,
+    source: 'iFinD · 公告检索',
+    asOf: Date.now(),
+    isFallback: false,
+    items,
+    vacuum: items.length === 0,
   };
 }

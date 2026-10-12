@@ -4,7 +4,7 @@
 
 **Blocked by:** None (可立即开始)
 
-**Status:** ready-for-agent
+**Status:** done (2026-10-12，经双轴 code-review，修复 2 个真实缺陷)
 
 - [ ] Next.js 14 App Router + TypeScript + Tailwind 脚手架就绪，`npm run dev` 可启动
 - [ ] 环境变量从 `.env` 读取（DEEPSEEK_API_KEY、DEEPSEEK_BASE_URL、FUYAO_API_KEY、IFIND_MCP_KEY），服务端可访问
