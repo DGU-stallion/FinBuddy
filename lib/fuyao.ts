@@ -7,8 +7,8 @@
  * - code=4001 表示限流
  */
 
-export const FUYAO_MCP_URL = 'https://fuyao.aicubes.cn/mcp/a-share';
 export const FUYAO_REST_BASE = 'https://fuyao.aicubes.cn';
+export const FUYAO_MCP_URL = `${FUYAO_REST_BASE}/mcp/a-share`;
 
 interface McpEnvelope {
   result?: { content?: Array<{ text?: string }>; structuredContent?: unknown };
