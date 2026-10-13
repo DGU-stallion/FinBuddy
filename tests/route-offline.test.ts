@@ -70,14 +70,19 @@ async function post(
   POST: (req: never) => Promise<Response>,
   messages: unknown[],
 ) {
-  const res = await POST(
+  const res = await postRaw(POST, { messages });
+  return parseUiStream(await res.text());
+}
+
+/** 原样发任意 body（用于验证非法入参的拒绝行为）。 */
+async function postRaw(POST: (req: never) => Promise<Response>, body: unknown): Promise<Response> {
+  return POST(
     new Request('http://localhost/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messages }),
+      body: JSON.stringify(body),
     }) as never,
   );
-  return parseUiStream(await res.text());
 }
 
 const userMsg = (text: string) => ({
@@ -280,6 +285,11 @@ if (!HAS_GATEWAY_CREDS) {
 }
 
 describe.skipIf(!HAS_GATEWAY_CREDS)('离线端到端：工具链路与降级（mock 模型 + 真实网关）', () => {
+  // 这两个用例会**真的调用扶摇网关**（网络 I/O），5s 的默认超时在原理上就不合适：
+  // 全量并行跑时另一个真机用例同时占用网络，实测被拖到 >5s 而假失败（单跑仅 1.3s）。
+  // 真实网络调用必须有真实的超时预算，否则测试会因为机器负载而非代码问题变红。
+  const NET_TIMEOUT_MS = 30_000;
+
   let mock2: MockModel;
   beforeAll(async () => {
     mock2 = await startMockModel();
@@ -314,7 +324,7 @@ describe.skipIf(!HAS_GATEWAY_CREDS)('离线端到端：工具链路与降级（m
     };
     expect(contract.citations.invalid).toEqual([]);
     expect(contract.ok).toBe(true);
-  });
+  }, NET_TIMEOUT_MS);
 
   it('降级数据（L2）触发降级声明；未声明则契约报 missing_fallback_disclosure', async () => {
     mock2.setScenario({
@@ -342,7 +352,7 @@ describe.skipIf(!HAS_GATEWAY_CREDS)('离线端到端：工具链路与降级（m
       // L1 实时 → 不该报降级相关违规（不虚报）
       expect(codes).not.toContain('missing_fallback_disclosure');
     }
-  });
+  }, NET_TIMEOUT_MS);
 });
 
 describe('追问在**本轮末尾**生成（ADR-0002 补充决策 5）', () => {
@@ -450,5 +460,51 @@ describe('末尾追问：模型给出的合规数组会被采用（而非一律�
     }
 
     mock4.setScenario({ planJson: DEFAULT_PLAN, streamChunks: [DEFAULT_BODY] });
+  });
+});
+
+describe('入参形状异常必须干净拒绝，不得 500 崩栈', () => {
+  // 真缺陷：POST 直接解构 `{ messages }`，形状不对时在
+  // convertToModelMessages 里抛 "Cannot read properties of undefined (reading 'map')"
+  // 并以 500 返回整段堆栈。前端若发错形状（旧版本客户端、第三方调用方、
+  // 手工 curl）就会看到服务器内部错误，而正确行为是 4xx 干净拒绝。
+  // 本仓库的 fail-closed 原则要求"拒绝要说清原因"，不是崩。
+  let mock3: MockModel;
+  let POST3: (req: never) => Promise<Response>;
+  beforeAll(async () => {
+    mock3 = await startMockModel();
+    mock3.setScenario({ planJson: DEFAULT_PLAN, streamChunks: [DEFAULT_BODY] });
+    POST3 = await loadRoute(mock3.url);
+  });
+  afterAll(async () => {
+    await mock3.close();
+  });
+
+  const badBodies: Array<[string, unknown]> = [
+    ['messages 缺失', {}],
+    ['messages 不是数组', { messages: 'nope' }],
+    ['messages 为空数组', { messages: [] }],
+    ['消息缺 parts（旧格式）', { messages: [{ id: 'm1', role: 'user', content: '你好' }] }],
+    ['parts 不是数组', { messages: [{ id: 'm1', role: 'user', parts: 'x' }] }],
+    ['没有任何 user 消息', { messages: [{ id: 'm1', role: 'assistant', parts: [] }] }],
+  ];
+
+  for (const [name, body] of badBodies) {
+    it(`${name} → 4xx 且响应体说明原因`, async () => {
+      const res = await postRaw(POST3 as never, body);
+      // 关键：不是 500（500 意味着未捕获异常穿透到了框架）
+      expect(res.status).toBeGreaterThanOrEqual(400);
+      expect(res.status).toBeLessThan(500);
+      const text = await res.text();
+      expect(text.length).toBeGreaterThan(0); // 必须有可读原因，不能空体
+    });
+  }
+
+  it('合法形状仍正常 200（不得因加校验而误伤）', async () => {
+    const res = await postRaw(POST3 as never, {
+      messages: [{ id: 'm1', role: 'user', parts: [{ type: 'text', text: '中际旭创怎么样' }] }],
+    });
+    expect(res.status).toBe(200);
+    await res.text();
   });
 });

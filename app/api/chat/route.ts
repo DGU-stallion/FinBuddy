@@ -173,8 +173,66 @@ async function planAnalysis(userText: string, priorSummary?: string): Promise<Pl
   return { plan, followUps, fromModel: true };
 }
 
+/**
+ * 校验 UI 消息流入参形状。
+ *
+ * 真缺陷（补跑真机测试时发现）：此前直接解构 `{ messages }` 就用，
+ * 形状不对时在 convertToModelMessages 里抛
+ * "Cannot read properties of undefined (reading 'map')" 并以 **500 + 整段堆栈**返回。
+ * 更糟的是 `messages: 'nope'` 这种非数组值会让 `[...'nope']` 静默展开成字符数组，
+ * 一路走到 200 —— 不报错、也不是我们要处理的东西。
+ *
+ * 为什么必须是 4xx 而非 500：本仓库的 fail-closed 原则要求"拒绝要说清原因"。
+ * 前端发错形状（旧客户端 / 第三方调用方 / 手工 curl）是**调用方错误**，
+ * 不是服务端故障；500 会让调用方误以为是我们的问题而重试。
+ *
+ * 返回 null 表示通过（保持调用点扁平）。
+ */
+function validateMessages(input: unknown): { ok: true; messages: UIMessage[] } | { ok: false; reason: string } {
+  if (typeof input !== 'object' || input === null) {
+    return { ok: false, reason: '请求体必须是 JSON 对象' };
+  }
+  const { messages } = input as { messages?: unknown };
+  if (!Array.isArray(messages)) {
+    return { ok: false, reason: '字段 messages 必须是数组' };
+  }
+  if (messages.length === 0) {
+    return { ok: false, reason: 'messages 不能为空' };
+  }
+  for (const [i, m] of messages.entries()) {
+    if (typeof m !== 'object' || m === null) {
+      return { ok: false, reason: `messages[${i}] 必须是对象` };
+    }
+    const msg = m as { role?: unknown; parts?: unknown };
+    if (msg.role !== 'user' && msg.role !== 'assistant' && msg.role !== 'system') {
+      return { ok: false, reason: `messages[${i}].role 必须是 user/assistant/system` };
+    }
+    if (!Array.isArray(msg.parts)) {
+      // 旧格式（content 字符串）也在此拦下：要么升级客户端，要么在服务端适配，
+      // 但绝不能靠"碰巧不崩"来兼容。
+      return { ok: false, reason: `messages[${i}].parts 必须是数组（UI 消息流协议）` };
+    }
+  }
+  if (!messages.some((m) => (m as { role?: unknown }).role === 'user')) {
+    return { ok: false, reason: 'messages 中至少需要一条 user 消息' };
+  }
+  return { ok: true, messages: messages as UIMessage[] };
+}
+
 export async function POST(req: NextRequest) {
-  const { messages }: { messages: UIMessage[] } = await req.json();
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    return Response.json({ error: '请求体不是合法 JSON' }, { status: 400 });
+  }
+
+  const v = validateMessages(body);
+  if (!v.ok) {
+    // 回显原因（调用方需要知道自己错在哪），但不回显任何内部堆栈
+    return Response.json({ error: v.reason }, { status: 400 });
+  }
+  const { messages } = v;
 
   const lastUser = [...messages].reverse().find((m) => m.role === 'user');
   const userText =
