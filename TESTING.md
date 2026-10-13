@@ -12,6 +12,7 @@ npm install
 npm test              # 全部测试（单测 + 组件 + 离线端到端 + 真机集成）
 npm run typecheck     # tsc --noEmit
 npm run build         # next build（含内置 lint 与类型检查）
+npm run lint          # ESLint（next/core-web-vitals）
 npm run test:compliance   # 合规测试集（需要 dev server）
 ```
 
@@ -24,6 +25,7 @@ npm run test:compliance   # 合规测试集（需要 dev server）
 | `npx vitest run` | **Test Files 36 passed (36)；Tests 374 passed \| 2 skipped (376)** |
 | `npx tsc --noEmit` | 干净（无输出） |
 | `npm run build` | ✓ Compiled successfully |
+| `npm run lint` | ✓ No ESLint warnings or errors |
 | `node scripts/compliance-suite.mjs` | **6/6 通过，exit 0**（2026-10-13 早间，余额充足时） |
 | `npx vitest run tests/agent-contract.integration.test.ts` | **2/2 通过**（同一时段） |
 
@@ -219,5 +221,5 @@ npx tsx scripts/t5-verify.mts                 # 两个预置案例的测算参�
 - [ ] **词表消歧的假阴性边界**：`杠杆` 等歧义词采用"无操作标记即视为术语"的取向，
       模型若用未预料到的说法表达操作意图会漏报。该风险在
       `lib/vocabulary.test.ts` 中被**显式断言为已知边界**，不假装为零。
-- [ ] **`npm run lint` 未配置**：`next lint` 会交互式提示初始化 ESLint，
-      本仓库未初始化。`npm run build` 内置的 lint 与类型检查是通过的。
+- [x] ~~`npm run lint` 未配置~~ → **已修复**（2026-10-13）：补充 `.eslintrc.json`
+      （extends `next/core-web-vitals`）。现 `npm run lint` 通过：**No ESLint warnings or errors**。
