@@ -108,24 +108,50 @@ function isOperationUsage(text: string, idx: number, term: string): boolean {
   const left = text.slice(Math.max(0, idx - 8), idx).replace(/[\s"'（）()]/g, '');
   const right = text.slice(idx + term.length, idx + term.length + 8).replace(/[\s"'（）()]/g, '');
 
-  // 1) 操作前缀 + 量词间隔
-  //    前缀与歧义词之间只允许夹量词（「加**五倍**杠杆」「上**三成**杠杆」），
-  //    不能夹任意文字 —— 否则「动，**用**于刻画经营杠杆」里的"用"会被误当中缀
-  //    （真实缺陷：真机 10 次运行误报 1 次，就是"用于"的"用"）。
-  const OPERATION_PREFIXES = ['加', '上', '用', '带', '配', '撬', '放'];
+  // 0) 意图动词出现在左侧窗口（我要加杠杆 / 我打算加杠杆 / N倍杠杆干）：
+  //    「加/上/配」等前缀可能被量词与其它字隔开，先看有没有明确意图动词。
+  if (/我要|我想|打算|准备|准备用|想要|应该|可以|建议|推荐/.test(left)) {
+    // 仅当左侧窗口内确有操作前缀字时才计（避免「我想要了解经营杠杆」误报）
+    if (/[加上配撬放]/.test(left) || /倍数|成仓/.test(left)) return true;
+  }
+
+  // 1) 操作前缀：必须是**紧邻**歧义词的动词，且中间只许夹量词。
+  //
+  //    踩过两次坑，记录以免再犯：
+  //    a) 用 endsWith 判前缀 → 漏掉「加**五倍**杠杆」（中间夹量词）。
+  //    b) 改成"窗口内 includes 前缀字" → `用`/`带` 这类**一字前缀**过宽，
+  //       把标准财务术语误判为操作：`利用杠杆效应`、`费用杠杆`、`信用杠杆`、
+  //       `使用杠杆比率`、`带杠杆的ETF` 全部误报（Standard 轴评审实证）。
+  //       与原始 `杠杆` 误报同类 —— 会造成对**正确输出**的违规告警。
+  //
+  //    现在的规则：前缀字之后到歧义词之间**只允许量词**，且前缀字前一位
+  //    不能是构词字（如「利/费/信/使」）—— 后者会把复合法转成操作指令。
+  const ONE_CHAR_PREFIXES = ['加', '上', '配', '撬', '放'];
+  // `用`/`带` 单独作前缀时歧义太大（利用/费用/信用/使用/带杠杆的ETF），
+  // 仅在紧随明确操作动词时才计（见下方右侧动词规则），故不列入一字前缀。
   const QUANTIFIER_GAP = /^[\d一二三四五六七八九十百千万零两倍成仓位%%.、]*$/;
-  for (const p of OPERATION_PREFIXES) {
+  // 构词字：出现在一字前缀之前时，说明是复合法而非操作指令
+  const COMPOUND_CHARS = ['利', '费', '信', '使', '税', '要', '因'];
+  for (const p of ONE_CHAR_PREFIXES) {
     const at = left.lastIndexOf(p);
     if (at === -1) continue;
-    if (QUANTIFIER_GAP.test(left.slice(at + 1))) return true;
+    if (!QUANTIFIER_GAP.test(left.slice(at + 1))) continue;
+    const before = at > 0 ? left[at - 1] : '';
+    if (COMPOUND_CHARS.includes(before)) continue;
+    return true;
   }
 
   // 2) 建议/索取句式：「建议用杠杆」「推荐加杠杆」「能加杠杆吗」
   if (/建议|推荐|应该|不妨|可以|要不要|该不该|能不能/.test(left)) return true;
 
-  // 3) 右侧操作动词需紧邻（不隔字）：「杠杆买入」「满仓干」
+  // 3) 右侧操作动词需紧邻（不隔字）：「杠杆买入」「满仓干」「带杠杆冲进去」
   const OPERATION_RIGHT = ['买入', '卖出', '干', '冲', '搞', '梭哈', '进场', '抄底'];
   if (OPERATION_RIGHT.some((t) => right.startsWith(t))) return true;
+
+  // 4) 左为「用/使用/利用」且右侧是操作结果词 → 是操作指令
+  //    （「用杠杆放大收益」vs「利用杠杆效应扩大生产」：后者是"效应/作用"这类术语名词）
+  const USAGE_PREFIX = /(用|使用|利用)$/.test(left);
+  if (USAGE_PREFIX && /^(放大|获利|套利|博取|赚|翻|加码|做多)/.test(right)) return true;
 
   return false;
 }

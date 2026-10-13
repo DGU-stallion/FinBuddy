@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parsePlanJson, buildPlanPrompt, buildSystemPrompt } from './analysis';
+import { parsePlanJson, buildPlanPrompt, buildSystemPrompt, buildFollowUpPrompt } from './analysis';
 
 /**
  * Seam 3b: 模型产出的解析与提示词构造（lib/analysis.ts 的另一半）
@@ -169,5 +169,46 @@ describe('buildPlanPrompt · 多轮上下文（T5）', () => {
   it('首轮不带摘要时提示词不含上下文段', () => {
     const p = buildPlanPrompt('宁德时代怎么样');
     expect(p).not.toContain('本轮标的：');
+  });
+});
+
+describe('buildFollowUpPrompt（追问必须在**本轮末尾**基于本轮发现生成）', () => {
+  // ADR-0002 补充决策 5 原文：「底部 3 个追问按钮由 LLM **在本轮末尾**生成
+  // （保证逻辑递进）」。原实现把追问放在计划阶段（分析之前）产出，
+  // 与本轮证据发现完全无关 —— 无法像票面例子那样针对本轮结果下钻。
+  const plan = {
+    reframedClaim: '中际旭创业绩未因砍单传闻恶化。',
+    intentTags: ['标的: 中际旭创'],
+    subQuestions: [{ question: '营收多少？', verificator: 'financials' as const }],
+  };
+
+  it('把本轮正文摘要交给提示词（追问才有依据下钻）', () => {
+    const p = buildFollowUpPrompt(plan, '【支持证据】TTM 营收 1245 亿，净利率 35%。', 3);
+    expect(p).toContain('1245 亿');
+  });
+
+  it('要求恰好 3 条，且是证伪/下钻/对比三类方向', () => {
+    const p = buildFollowUpPrompt(plan, '正文', 3);
+    expect(p).toContain('3');
+    expect(p).toMatch(/证伪|下钻|对比/);
+  });
+
+  it('禁止操作向与预测向（复用合规红线措辞）', () => {
+    const p = buildFollowUpPrompt(plan, '正文', 3);
+    expect(p).toMatch(/禁止|不得|绝不/);
+    expect(p).toMatch(/买入|卖出|操作/);
+  });
+
+  it('要求围绕本轮已查到的具体事实下钻（而非泛泛而谈）', () => {
+    const p = buildFollowUpPrompt(plan, '正文', 3);
+    expect(p).toMatch(/本轮|已查到|具体/);
+  });
+
+  it('无正文时不崩（降级为空摘要）', () => {
+    expect(() => buildFollowUpPrompt(plan, '', 3)).not.toThrow();
+  });
+
+  it('确定性：同输入同输出', () => {
+    expect(buildFollowUpPrompt(plan, 'x', 3)).toBe(buildFollowUpPrompt(plan, 'x', 3));
   });
 });

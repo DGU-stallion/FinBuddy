@@ -15,6 +15,7 @@
 
 import { checkCitations } from './citations';
 import { scanPredictionLanguage } from './analysis';
+import { utcDate } from './format';
 
 /** 契约要求存在的分栏（顺序无关，仅校验存在性）。 */
 export const REQUIRED_SECTIONS = ['命题重构', '支持证据', '反对证据', '无法验证项'] as const;
@@ -100,13 +101,6 @@ export function extractSection(text: string, name: string): string | null {
 function isShallow(content: string): boolean {
   if (content === '') return true;
   return PLACEHOLDER_RE.test(content);
-}
-
-/** 以 UTC 格式化日期，保证校验与测试不受本地时区影响。 */
-function utcDate(ms: number): string {
-  const d = new Date(ms);
-  const p = (n: number) => String(n).padStart(2, '0');
-  return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())}`;
 }
 
 /**

@@ -1,3 +1,5 @@
+import { utcDate } from './format';
+
 /**
  * Seam 9: 确定性敏感性测算引擎（营收冲击推演，ADR-0001 决策 1）
  *
@@ -92,7 +94,12 @@ export function revenueDeclineRange(): { min: number; max: number } {
 }
 
 export interface BasisInput {
-  revenueBasis: RevenueBasisLike;
+  /**
+   * 口径。刻意接受任意字符串：网关演进可能返回未预料的口径名，
+   * 而 UI 必须**诚实展示原值**（而非丢掉或崩溃）。未知值由下方映射兜底为"缺失"
+   * —— 这也正是 `?? '缺失'` 存在的原因，故类型不该收死（Standard 轴评审 #8）。
+   */
+  revenueBasis: RevenueBasisLike | (string & {});
   report?: string;
   asOf?: number;
 }
@@ -102,13 +109,6 @@ const BASIS_LABEL: Record<string, string> = {
   latest_quarter_x4: '最近单季 × 4（降级口径，未经季节性调整）',
   missing: '缺失',
 };
-
-function utcDate(ms: number | undefined): string {
-  if (!ms || Number.isNaN(ms)) return '时点缺失';
-  const d = new Date(ms);
-  const p = (n: number) => String(n).padStart(2, '0');
-  return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())}`;
-}
 
 /**
  * 口径与时点的人类可读标注。
@@ -128,7 +128,8 @@ export interface SensitivityInjectParams {
   baseRevenue: number;
   netMargin: number;
   taxRate: number;
-  revenueBasis: string;
+  /** 口径：已知枚举或未知字符串（保留原始值以便 UI 诚实展示）。 */
+  revenueBasis: RevenueBasisLike | (string & {});
   report?: string;
   asOf?: number;
 }

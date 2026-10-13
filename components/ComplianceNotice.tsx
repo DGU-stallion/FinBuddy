@@ -1,5 +1,7 @@
 'use client';
 
+import type { ComplianceLayerName } from '@/lib/message-view';
+
 /**
  * 合规拦截提示（T3 的 data-compliance，ADR-0002 决策 1、6）
  *
@@ -9,7 +11,8 @@
  * - 机器可读的 `layer` 优先于文案：文案会改，信号不应依赖字符串嗅探。
  */
 
-export type ComplianceLayer = 'keyword' | 'intent' | 'fail_closed';
+// 复用 lib/message-view.ts 的声明，避免同一字面量联合两处维护（Standard 轴评审 #4）
+export type ComplianceLayer = ComplianceLayerName;
 
 const STYLE: Record<ComplianceLayer, { border: string; bg: string; icon: string; title: string }> = {
   keyword: {
@@ -59,13 +62,4 @@ export function ComplianceNotice({
       )}
     </div>
   );
-}
-
-/**
- * 从流式文本里剥离合规提示文案（避免与正文重复渲染）。
- * 拦截路径只有一段文本，这里直接返回空即可 —— 保留函数以便未来
- * 在正常路径中夹带合规提示时筛选。
- */
-export function extractComplianceBody(text: string): string {
-  return text;
 }

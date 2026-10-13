@@ -30,6 +30,9 @@ export interface ContextSummary {
   toPromptText(): string;
 }
 
+import { toYi as toYiShared } from './format';
+import { readSnapshot, readFinancials, readAnnouncements } from './payload-fields';
+
 interface RefLike {
   refId?: unknown;
   kind?: unknown;
@@ -60,8 +63,9 @@ function numStr(v: unknown, digits: number): string | undefined {
   return typeof v === 'number' && Number.isFinite(v) ? v.toFixed(digits) : undefined;
 }
 
-function toYi(v: unknown): string | undefined {
-  return typeof v === 'number' && Number.isFinite(v) ? `${(v / 1e8).toFixed(2)} 亿元` : undefined;
+function toYi(v: number | undefined): string | undefined {
+  // 复用共享实现（单一事实来源），仍对缺失值返回 undefined
+  return v === undefined ? undefined : toYiShared(v);
 }
 
 /**
@@ -77,16 +81,16 @@ export function summarizeFacts(refs: readonly RefLike[]): ConfirmedFact[] {
     const refId = str(r.refId);
     if (!refId) continue;
     const kind = str(r.kind) ?? 'unknown';
-    const p = asObj(r.payload) as PayloadLike;
-    const nested = asObj(p.data);
 
+    // 形状适配统一走 lib/payload-fields.ts（单一事实来源，Standard 轴评审 #7）：
+    // 此前本模块与 lib/evidence.ts 各自实现"字段在哪一层"的规则，
+    // 网关 payload 形状一变就要改两处，漏一处即静默取不到值。
     if (kind === 'snapshot') {
-      const name = str(nested.name);
-      const code = str(nested.thscode);
-      const price = numStr(nested.last_price, 2);
-      const pe = numStr(nested.pe_ttm, 2);
+      const d = readSnapshot(r.payload);
+      const price = numStr(d.lastPrice, 2);
+      const pe = numStr(d.peTtm, 2);
       const parts = [
-        name ? `${name}${code ? `(${code})` : ''}` : code,
+        d.name ? `${d.name}${d.thscode ? `(${d.thscode})` : ''}` : d.thscode,
         price ? `最新价 ${price} 元` : undefined,
         pe ? `PE(TTM) ${pe}` : undefined,
       ].filter(Boolean);
@@ -95,13 +99,12 @@ export function summarizeFacts(refs: readonly RefLike[]): ConfirmedFact[] {
     }
 
     if (kind === 'financials') {
-      const pick = (k: keyof PayloadLike) => p[k] ?? nested[k as string];
-      const rev = toYi(pick('baseRevenue'));
-      const basis = str(p.revenueBasis) ?? str(nested.revenueBasis);
-      const margin = numStr(pick('netMargin'), 2);
-      const gross = numStr(pick('grossMargin'), 2);
+      const f = readFinancials(r.payload);
+      const rev = toYi(f.baseRevenue);
+      const margin = numStr(f.netMargin, 2);
+      const gross = numStr(f.grossMargin, 2);
       const parts = [
-        rev ? `基准营收 ${rev}${basis ? `（口径 ${basis}）` : ''}` : undefined,
+        rev ? `基准营收 ${rev}${f.revenueBasis ? `（口径 ${f.revenueBasis}）` : ''}` : undefined,
         margin ? `净利率 ${margin}%` : undefined,
         gross ? `毛利率 ${gross}%` : undefined,
       ].filter(Boolean);
@@ -110,18 +113,18 @@ export function summarizeFacts(refs: readonly RefLike[]): ConfirmedFact[] {
     }
 
     if (kind === 'announcements') {
-      const items = Array.isArray(p.items) ? p.items : [];
-      if (p.vacuum === true || items.length === 0) {
+      const ann = readAnnouncements(r.payload);
+      if (ann.vacuum) {
         facts.push({ refId, label: '公告检索', value: '未返回结果（信息真空期，不得据此脑补结论）' });
       } else {
-        const titles = items
+        const titles = ann.items
           .slice(0, 3)
-          .map((it) => str(asObj(it).title))
+          .map((it) => it.title)
           .filter((t): t is string => Boolean(t));
         facts.push({
           refId,
           label: '公告检索',
-          value: `命中 ${items.length} 条${titles.length > 0 ? `：${titles.join('；')}` : ''}`,
+          value: `命中 ${ann.items.length} 条${titles.length > 0 ? `：${titles.join('；')}` : ''}`,
         });
       }
       continue;

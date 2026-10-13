@@ -9,6 +9,7 @@ import {
   SLIDER_MIN_PCT,
   type SensitivityInjectParams,
 } from '@/lib/sensitivity';
+import { toYi as yi } from '@/lib/format';
 
 /**
  * Seam 9 渲染层：营收冲击推演滑块卡片（ADR-0001 决策 1，spec 交互决策）
@@ -27,10 +28,6 @@ function severityTone(ratioPct: number): { bar: string; text: string; label: str
   if (ratioPct < 15) return { bar: 'bg-amber-500', text: 'text-amber-400', label: '中等' };
   if (ratioPct < 22) return { bar: 'bg-orange-600', text: 'text-orange-400', label: '显著' };
   return { bar: 'bg-red-600', text: 'text-red-400', label: '严重' };
-}
-
-function yi(v: number): string {
-  return `${(v / 1e8).toFixed(2)} 亿元`;
 }
 
 export function SensitivityCard({ params }: { params: SensitivityInjectParams | null }) {
@@ -143,7 +140,9 @@ export function SensitivityCard({ params }: { params: SensitivityInjectParams | 
       <div className="mt-3 border-t border-slate-800 pt-3">
         <div className="text-[11px] text-slate-500">
           {describeBasis({
-            revenueBasis: params.revenueBasis as never,
+            // 不再用 as never：类型已收窄为 RevenueBasisLike | string，
+            // describeBasis 内部对未知口径有 '?? 缺失' 兜底（Standard 轴评审 #8）。
+            revenueBasis: params.revenueBasis,
             report: params.report,
             asOf: params.asOf,
           })}

@@ -33,6 +33,11 @@ export interface Scenario {
    * 判断"是否索取买卖决策"的请求里含合规定界语句。
    */
   intentVerdict?: string;
+  /**
+   * 追问生成阶段（本轮末尾的第二个非流式调用）要返回的 JSON 数组文本。
+   * 默认返回计划 JSON（非数组）→ 触发 sanitizeFollowUps 的确定性兜底。
+   */
+  followUpJson?: string;
 }
 
 export interface MockModel {
@@ -106,10 +111,27 @@ export async function startMockModel(initial?: Partial<Scenario>): Promise<MockM
     if (body.stream !== true) {
       // 意图判断请求可从提示词识别：它要求"只输出一个字"且含合规判别语句
       const flat = JSON.stringify(body);
+      // 靠提示词文案区分三个非流式端点。**这是脆弱耦合**（Standard 轴评审 #10）：
+      // 上游改一句提示词，这里就会静默走错分支，测试以误导性方式失败。
+      // 因此加自检：若一个请求都没命中已知端点，直接抛错并打印提示词开头，
+      // 让失败原因一目了然（而不是表现为"计划解析失败"之类的假象）。
       const isIntentJudge = flat.includes('合规判别器') || flat.includes('买卖操作决策');
+      const isFollowUp = flat.includes('追问生成器');
+      const isPlan = flat.includes('前置分析器');
+
+      if (!isIntentJudge && !isFollowUp && !isPlan) {
+        throw new Error(
+          '[mock-model] 无法识别该非流式请求属于哪个端点 —— 提示词可能已变更，' +
+            '请同步更新 tests/support/mock-model.ts 的识别关键词。请求开头：' +
+            flat.slice(0, 200),
+        );
+      }
+
       const content = isIntentJudge
         ? (scenario.intentVerdict ?? '否')
-        : scenario.planJson;
+        : isFollowUp
+          ? (scenario.followUpJson ?? scenario.planJson)
+          : scenario.planJson;
 
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(

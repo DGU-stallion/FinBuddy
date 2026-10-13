@@ -16,7 +16,7 @@
 import { detectDegraded, type RefEntry, type DegradedIndicator } from './evidence';
 import { extractSensitivityParams, type SensitivityInjectParams } from './sensitivity';
 import type { OrchestrationStep } from './orchestration';
-import type { AnalysisPlan } from './analysis';
+import { isVerificator, type AnalysisPlan } from './analysis';
 
 export type ComplianceLayerName = 'keyword' | 'intent' | 'fail_closed';
 
@@ -121,7 +121,9 @@ function parsePlan(part: Record<string, unknown> | null): AssistantView['plan'] 
     return [
       {
         question: sq.question,
-        verificator: (typeof sq.verificator === 'string' ? sq.verificator : 'unverifiable') as never,
+        // 用共享枚举校验而非 as never：后者会关掉枚举检查，
+        // 让非法 verificator 值静默穿过（Standard 轴评审 #9）。
+        verificator: isVerificator(sq.verificator) ? sq.verificator : 'unverifiable',
       },
     ];
   });

@@ -190,6 +190,14 @@ describe('真机输出的真实句子回归（防止再次误报）', () => {
     '资产负债表未显示杠杆失控：2026 年 6 月末资产负债率 36%',
     '经营杠杆系数较高',
     '用于刻画经营杠杆的敏感度；未考虑毛利率随价格/结构变化的反身性',
+    // Standard 轴评审补充：复合财务词（原来的"一字前缀过宽"会误报这些）
+    '该公司利用杠杆效应扩大生产规模',
+    '费用杠杆对利润的放大作用显著',
+    '信用杠杆水平处于历史低位',
+    '使用杠杆比率衡量资本结构',
+    '带杠杆的ETF需注意波动',
+    '利用杠杆提升ROE',
+    '经营杠杆与财务杠杆的合成效应',
   ];
 
   it('真实术语句子一律不误报（8 次运行曾误报 5 次以上）', () => {
@@ -208,8 +216,54 @@ describe('真机输出的真实句子回归（防止再次误报）', () => {
       '我要加杠杆',
       '杠杆满仓干',
       '上三成杠杆',
+      '用杠杆放大收益',
+      '带杠杆冲进去',
+      '我要上五倍杠杆',
     ]) {
       expect(containsAmbiguousTradeAction(s, AMBIGUOUS_FINANCE_TERMS), `漏报：${s}`).toBe(true);
     }
+  });
+});
+
+describe('Standard 轴评审 #1：一字前缀过宽造成的术语误报', () => {
+  // 真缺陷：'利用杠杆/费用杠杆/信用杠杆/使用杠杆/带杠杆' 里的 用/带 被当作操作前缀。
+  // 与原始 '杠杆' 误报同类（只是换成复合词形态），会造成对**正确输出**的违规告警。
+  const cases = [
+    '该公司利用杠杆效应扩大生产规模',
+    '费用杠杆对利润的放大作用显著',
+    '信用杠杆水平处于历史低位',
+    '使用杠杆比率衡量资本结构',
+    '带杠杆的ETF需注意波动',
+    '利用杠杆提升ROE',
+    '经营杠杆与财务杠杆的合成效应',
+  ];
+
+  it('含"用/带"的复合财务词一律不误报', () => {
+    for (const s of cases) {
+      expect(containsAmbiguousTradeAction(s, AMBIGUOUS_FINANCE_TERMS), `误报：${s}`).toBe(false);
+      expect(scanPredictionLanguage(s), `输出侧误报：${s}`).toEqual([]);
+    }
+  });
+
+  it('真正的操作句式仍必须命中（不得因收紧而漏）', () => {
+    for (const s of [
+      '加五倍杠杆干进去',
+      '建议用杠杆放大收益',
+      '用杠杆放大收益',
+      '上杠杆梭哈',
+      '配杠杆买入',
+      '杠杆买入',
+      '我要加杠杆',
+      '上三成杠杆',
+      '放杠杆',
+    ]) {
+      expect(containsAmbiguousTradeAction(s, AMBIGUOUS_FINANCE_TERMS), `漏报：${s}`).toBe(true);
+    }
+  });
+
+  it('"带杠杆"单独出现时按术语处理（无操作动词搭配）', () => {
+    expect(containsAmbiguousTradeAction('带杠杆的ETF', AMBIGUOUS_FINANCE_TERMS)).toBe(false);
+    // 但带操作动词时命中
+    expect(containsAmbiguousTradeAction('带杠杆冲进去', AMBIGUOUS_FINANCE_TERMS)).toBe(true);
   });
 });

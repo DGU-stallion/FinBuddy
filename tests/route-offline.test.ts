@@ -344,3 +344,111 @@ describe.skipIf(!HAS_GATEWAY_CREDS)('离线端到端：工具链路与降级（m
     }
   });
 });
+
+describe('追问在**本轮末尾**生成（ADR-0002 补充决策 5）', () => {
+  let mock3: MockModel;
+  beforeAll(async () => {
+    mock3 = await startMockModel();
+  });
+  afterAll(async () => {
+    await mock3.close();
+  });
+
+  it('追问请求发生在正文之后，且携带本轮正文作为依据', async () => {
+    // 原缺陷：追问在计划阶段（分析之前）产出，只依据用户提问，
+    // 无法针对本轮查到的证据下钻。
+    mock3.setScenario({
+      planJson: DEFAULT_PLAN,
+      streamChunks: ['【支持证据】本轮查到 TTM 营收 1245 亿、净利率 35.27%[^ref_1]。'],
+    });
+
+    const POST = await loadRoute(mock3.url);
+    mock3.requests.length = 0;
+    await post(POST, [userMsg('中际旭创怎么样')]);
+
+    // 找到追问生成请求（非流式、且提示词含"追问生成器"）
+    const fuReq = mock3.requests.find(
+      (b) => b.stream !== true && JSON.stringify(b).includes('追问生成器'),
+    );
+    expect(fuReq, '未发出末尾追问生成请求').toBeTruthy();
+
+    // 关键：该请求的提示词里带上了**本轮正文**（证明它在正文之后、有依据）
+    const flat = JSON.stringify(fuReq);
+    expect(flat).toContain('1245 亿');
+
+    // 且计划阶段不再产出 followUps（避免两处生成）
+    const planReq = mock3.requests.find(
+      (b) => b.stream !== true && JSON.stringify(b).includes('前置分析器'),
+    );
+    expect(planReq).toBeTruthy();
+  });
+
+  it('末尾追问仍恒为 3 条（确定性过滤与补齐不变）', async () => {
+    mock3.setScenario({ planJson: DEFAULT_PLAN, streamChunks: [DEFAULT_BODY] });
+    const POST = await loadRoute(mock3.url);
+    const r = await post(POST, [userMsg('中际旭创怎么样')]);
+    expect((r.dataParts.followups as { questions: string[] }).questions).toHaveLength(3);
+  });
+
+  it('末尾追问生成失败时回退确定性核验向兜底（不暴露失败）', async () => {
+    // mock 的第二次非流式调用若返回非数组，应被 sanitizeFollowUps 兜底到 3 条
+    mock3.setScenario({ planJson: DEFAULT_PLAN, streamChunks: [DEFAULT_BODY] });
+    const POST = await loadRoute(mock3.url);
+    const r = await post(POST, [userMsg('中际旭创怎么样')]);
+    const qs = (r.dataParts.followups as { questions: string[] }).questions;
+    expect(qs).toHaveLength(3);
+    for (const q of qs) expect(q.trim().length).toBeGreaterThan(5);
+  });
+
+  it('data-followups 仍在契约之后写出（顺序契约不变）', async () => {
+    mock3.setScenario({ planJson: DEFAULT_PLAN, streamChunks: [DEFAULT_BODY] });
+    const POST = await loadRoute(mock3.url);
+    const r = await post(POST, [userMsg('中际旭创怎么样')]);
+    expect(r.order).toEqual(['steps', 'plan', 'refs', 'contract', 'followups']);
+  });
+});
+
+describe('末尾追问：模型给出的合规数组会被采用（而非一律走兜底）', () => {
+  let mock4: MockModel;
+  beforeAll(async () => {
+    mock4 = await startMockModel();
+  });
+  afterAll(async () => {
+    await mock4.close();
+  });
+
+  it('采用模型给出的 3 条核验向问题，保持其顺序', async () => {
+    const three = ['本次查到的 36.3% 客户集中度能否与年报前五大客户口径互证？', '若砍单为真，合同负债与存货会先出现什么变化？', '与同行毛利率相比，本次净利率是否异常偏高？'];
+    mock4.setScenario({
+      planJson: DEFAULT_PLAN,
+      streamChunks: [DEFAULT_BODY],
+      followUpJson: JSON.stringify(three),
+    });
+
+    const POST = await loadRoute(mock4.url);
+    const r = await post(POST, [userMsg('中际旭创怎么样')]);
+    const qs = (r.dataParts.followups as { questions: string[] }).questions;
+    expect(qs).toEqual(three);
+
+    mock4.setScenario({ planJson: DEFAULT_PLAN, streamChunks: [DEFAULT_BODY] });
+  });
+
+  it('模型给出操作向追问时被过滤掉，由核验向兜底补齐', async () => {
+    mock4.setScenario({
+      planJson: DEFAULT_PLAN,
+      streamChunks: [DEFAULT_BODY],
+      followUpJson: JSON.stringify(['现在要不要买入？', '目标价是多少？', '能否给出明确买卖建议？']),
+    });
+
+    const POST = await loadRoute(mock4.url);
+    const r = await post(POST, [userMsg('中际旭创怎么样')]);
+    const qs = (r.dataParts.followups as { questions: string[] }).questions;
+
+    expect(qs).toHaveLength(3);
+    for (const q of qs) {
+      expect(q).not.toMatch(/要不要|目标价|买入|卖出/);
+    }
+
+    mock4.setScenario({ planJson: DEFAULT_PLAN, streamChunks: [DEFAULT_BODY] });
+  });
+});

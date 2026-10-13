@@ -1,6 +1,6 @@
 'use client';
 
-import { summarizeRef, tokenizeCitations, type RefEntry } from '@/lib/evidence';
+import { summarizeRef, type RefEntry } from '@/lib/evidence';
 
 /**
  * Seam 8 渲染层：存证抽屉（ADR-0002 决策 4）
@@ -167,20 +167,5 @@ export function EvidenceDrawer({
         )}
       </div>
     </aside>
-  );
-}
-
-/**
- * 与正文同源的角标渲染（抽屉里若再出现角标也可用）。
- * 保留导出以便未来在抽屉内渲染带角标的字段说明。
- */
-export function renderCitationsInline(
-  text: string,
-  allowed: readonly string[],
-): Array<{ kind: 'text' | 'citation'; value: string; valid?: boolean }> {
-  return tokenizeCitations(text, allowed).map((t) =>
-    t.type === 'text'
-      ? { kind: 'text' as const, value: t.value }
-      : { kind: 'citation' as const, value: t.refId, valid: t.valid },
   );
 }

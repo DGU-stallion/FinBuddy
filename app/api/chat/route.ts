@@ -27,10 +27,11 @@ import {
   validateAnalysisPlan,
   buildPlanPrompt,
   buildSystemPrompt,
+  buildFollowUpPrompt,
   fallbackReframe,
   type AnalysisPlan,
 } from '@/lib/analysis';
-import { sanitizeFollowUps } from '@/lib/followups';
+import { sanitizeFollowUps, FOLLOWUP_COUNT } from '@/lib/followups';
 import { validateAnalysisOutput } from '@/lib/output-contract';
 import { checkCitations } from '@/lib/citations';
 import { buildOrchestrationSteps, refKind, extractSubjectHint } from '@/lib/orchestration';
@@ -76,8 +77,54 @@ function fallbackPlan(subject: string): AnalysisPlan {
   };
 }
 
+/**
+ * 在本轮末尾生成追问（ADR-0002 补充决策 5：「由 LLM 在本轮末尾生成」）。
+ *
+ * 与原实现的区别（T4 Spec 轴评审抓出的缺陷）：原先把追问放在**计划阶段**
+ * 与命题一并产出，只依据用户提问，与本轮查到的证据无关 —— 无法针对本轮结果下钻。
+ * 现在把已成稿的正文作为依据，三个方向：证伪 / 下钻 / 对比。
+ *
+ * 任何失败都回退到确定性核验向兜底，绝不暴露失败，也绝不放行操作向问题。
+ */
+async function generateFollowUps(
+  plan: AnalysisPlan,
+  body: string,
+  subject: string,
+): Promise<string[]> {
+  let raw: string;
+  try {
+    const r = await generateText({
+      model: deepseek(MODEL_ID),
+      prompt: buildFollowUpPrompt(plan, body, FOLLOWUP_COUNT),
+      temperature: 0,
+    });
+    raw = r.text;
+  } catch {
+    return sanitizeFollowUps([], { subject });
+  }
+
+  // 追问是 JSON 数组（不是对象），单独解析
+  let arr: unknown = null;
+  try {
+    const fence = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    const candidate = fence?.[1] ?? raw;
+    const start = candidate.indexOf('[');
+    const end = candidate.lastIndexOf(']');
+    if (start !== -1 && end > start) arr = JSON.parse(candidate.slice(start, end + 1));
+  } catch {
+    arr = null;
+  }
+
+  // 无论模型给了什么，都必须过确定性核验向过滤并补齐到恒 3 条
+  return sanitizeFollowUps(arr, { subject });
+}
+
 interface PlannedAnalysis {
   plan: AnalysisPlan;
+  /**
+   * 计划阶段的追问**已废弃**：追问改到本轮末尾生成（见 generateFollowUps），
+   * 因为它需要本轮查到的证据作为依据。保留字段仅用于兜底路径的立即填值。
+   */
   followUps: string[];
   /** 计划是否由模型产出（false 表示已回退到确定性兜底，供前端标注）。 */
   fromModel: boolean;
@@ -163,7 +210,8 @@ export async function POST(req: NextRequest) {
   // 从历史 data part 反推，故客户端无需额外配合（spec 交互决策）。先算摘要，
   // 因为计划阶段也要用它消解指代型追问（否则标签会丢掉标的）。
   const priorSummary = buildContextSummary(messages);
-  const { plan, followUps, fromModel } = await planAnalysis(userText, priorSummary?.toPromptText());
+  const { plan, fromModel } = await planAnalysis(userText, priorSummary?.toPromptText());
+  const subject = subjectFromTags(plan.intentTags);
 
   // 引用号分配器：单调递增，与登记解耦（修复并发下 refId 重复的缺陷）
   const refs = createRefAllocator<unknown>();
@@ -351,11 +399,13 @@ export async function POST(req: NextRequest) {
         },
       });
 
-      // 追问：模型生成 + 确定性核验向过滤（ADR-0002 补充决策 5）
+      // 追问：**在本轮末尾**基于本轮已核验的正文生成（ADR-0002 补充决策 5），
+      // 再经确定性核验向过滤与补齐（恒 3 条）。
+      const finalFollowUps = await generateFollowUps(plan, text, subject);
       writer.write({
         type: 'data-followups',
         id: PART.followups,
-        data: { questions: followUps },
+        data: { questions: finalFollowUps },
       });
     },
   });

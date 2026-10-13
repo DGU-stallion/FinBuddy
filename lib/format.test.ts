@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { formatSnapshotForLLM, formatFinancialsForLLM } from './format';
+import { formatSnapshotForLLM, formatFinancialsForLLM, toYi, utcDate } from './format';
 
 /**
  * Seam 11: payload -> LLM 上下文文本
@@ -90,5 +90,68 @@ describe('formatFinancialsForLLM', () => {
     expect(text).toContain('33.32%');
     expect(text).toContain('TTM');
     expect(text).toContain('ref_3');
+  });
+});
+
+describe('formatFinancialsForLLM · 税率来源必须与 UI 口径一致（Standard 轴评审 #2）', () => {
+  const base = {
+    refId: 'ref_1',
+    source: '扶摇 · 利润表/财务指标',
+    asOf: Date.UTC(2026, 9, 13),
+    isFallback: false,
+    data: {
+      report: '2026-2',
+      baseRevenue: 124518996370.97,
+      revenueBasis: 'TTM' as const,
+      netMargin: 35.2661,
+      grossMargin: 46.2522,
+      taxRate: 14.678138806059899,
+    },
+  };
+
+  it('标注"有效所得税率（推导）"，不得让模型以为是接口直出字段', () => {
+    const t = formatFinancialsForLLM(base);
+    // 关键：这是喂给模型的上下文，决定模型在正文里怎么转述。
+    // 若此处无标注，模型会说"据财报，所得税率为 14.84%" —— 绕过 UI 的诚实标注。
+    expect(t).toContain('有效所得税率');
+    expect(t).toMatch(/推导/);
+    expect(t).toMatch(/Σ|税前利润/);
+  });
+
+  it('与存证抽屉 / 测算卡片的口径一致（三处措辞必须同源）', () => {
+    const t = formatFinancialsForLLM(base);
+    expect(t).toContain('所得税费用');
+  });
+
+  it('税率缺失时写"缺失"，不回退默认值', () => {
+    const t = formatFinancialsForLLM({ ...base, data: { ...base.data, taxRate: undefined } });
+    expect(t).toContain('缺失');
+    expect(t).not.toMatch(/所得税率：15/);
+  });
+
+  it('降级财务数据带 fallbackNote（与 Snapshot 对称）', () => {
+    const t = formatFinancialsForLLM({
+      ...base,
+      isFallback: true,
+      fallbackNote: '财务参数抓取于 2026-10-13，非最新报告期',
+    });
+    expect(t).toContain('降级存证');
+    expect(t).toContain('非最新报告期');
+  });
+});
+
+describe('共享格式化助手（消除多处重复实现）', () => {
+  it('toYi 与原有各处口径一致（两位小数 + 亿元）', () => {
+    expect(toYi(124518996370.97)).toBe('1245.19 亿元');
+    expect(toYi(0)).toBe('0.00 亿元');
+    expect(toYi(1e8)).toBe('1.00 亿元');
+  });
+
+  it('utcDate 输出 UTC 纯日期，且缺失时给"时点缺失"而非 Invalid Date', () => {
+    expect(utcDate(Date.UTC(2026, 9, 13, 23, 59))).toBe('2026-10-13');
+    // 跨时区稳定：UTC 23:59 仍属当日（本地时区若为 +8 会变成次日）
+    expect(utcDate(0)).toBe('时点缺失');
+    expect(utcDate(undefined)).toBe('时点缺失');
+    expect(utcDate(NaN)).toBe('时点缺失');
   });
 });

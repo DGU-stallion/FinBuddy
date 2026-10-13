@@ -54,11 +54,6 @@ function fmtDate(ms: number): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
-/** 亿元换算，保留两位小数 */
-function toYi(v: number): string {
-  return `${(v / 1e8).toFixed(2)} 亿元`;
-}
-
 export function formatSnapshotForLLM(p: SnapshotPayload): string {
   const d = p.data;
   const lines: string[] = [];
@@ -98,6 +93,44 @@ export function formatFinancialsForLLM(p: FinancialsPayload): string {
   );
   lines.push(`净利率：${isMissing(d.netMargin) ? '缺失' : `${d.netMargin.toFixed(2)}%`}`);
   lines.push(`毛利率：${isMissing(d.grossMargin) ? '缺失' : `${d.grossMargin.toFixed(2)}%`}`);
-  lines.push(`所得税率：${isMissing(d.taxRate) ? '缺失' : `${d.taxRate.toFixed(2)}%`}`);
+  // 标注来源："有效所得税率"是**推导值**（Σ所得税费用 ÷ Σ税前利润），不是接口直出字段。
+  // 这里必须与 UI（lib/evidence.ts 抽屉、SensitivityCard 测算卡片）口径一致 ——
+  // 否则模型会转述成"据财报，所得税率为 14.84%"，绕过 UI 层的诚实标注。
+  // （Standard 轴评审指出：标注做了三层，唯独漏了决定模型怎么说的最上游一层。）
+  lines.push(
+    `有效所得税率（推导：Σ所得税费用 ÷ Σ税前利润）：${
+      isMissing(d.taxRate) ? '缺失' : `${d.taxRate.toFixed(2)}%`
+    }`,
+  );
   return lines.join('\n');
 }
+
+// ---------- 共享格式化助手（单一事实来源，避免多处重复实现分叉） ----------
+
+/**
+ * UTC 纯日期 `YYYY-MM-DD`。
+ *
+ * 为什么统一到 UTC（Standard 轴评审 #5）：本函数此前在 lib/evidence.ts、
+ * lib/sensitivity.ts、lib/output-contract.ts 各有一份**逐字重复**实现。
+ * 重复实现会静默分叉（任一处改精度/时区，其余不变），故收敛到此处导出。
+ *
+ * 用 UTC 而非本地时区：存证时点的展示与契约校验必须与运行机器的时区无关，
+ * 否则同一份 payload 在不同时区看到不同日期，校验结果也会漂移。
+ * （注意 lib/format.ts 里的 fmtDate 带时分、用本地时区，用于 LLM 上下文，
+ *  语义不同，保留。）
+ */
+export function utcDate(ms: number | undefined): string {
+  if (!ms || !Number.isFinite(ms) || ms <= 0) return '时点缺失';
+  const d = new Date(ms);
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())}`;
+}
+
+/**
+ * 亿元换算，两位小数（共享单一事实来源）。
+ *
+ * 此前有 4 份重复实现（lib/format.ts、lib/evidence.ts、lib/context-summary.ts、
+ * components/SensitivityCard.tsx），其中 evidence.ts 的注释还自称"与 format 同口径"
+ * —— 用注释代偿重复，未来改精度就会静默分叉（Standard 轴评审 #6）。
+ */
+export const toYi = (v: number): string => `${(v / 1e8).toFixed(2)} 亿元`;

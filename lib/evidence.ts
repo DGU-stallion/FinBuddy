@@ -12,6 +12,8 @@
  */
 
 import { extractSection } from './output-contract';
+import { toYi, utcDate } from './format';
+import { readSnapshot, readFinancials, readAnnouncements, str } from './payload-fields';
 
 /** 三栏证据的固定列（顺序即展示顺序）。 */
 export const EVIDENCE_COLUMNS = ['支持证据', '反对证据', '无法验证项'] as const;
@@ -105,11 +107,6 @@ export interface RefSummary {
   fields: RefField[];
 }
 
-/** 亿元换算（与 lib/format.ts 同口径）。 */
-function toYi(v: number): string {
-  return `${(v / 1e8).toFixed(2)} 亿元`;
-}
-
 function num(v: unknown): number | undefined {
   return typeof v === 'number' && Number.isFinite(v) ? v : undefined;
 }
@@ -117,13 +114,6 @@ function num(v: unknown): number | undefined {
 /** 缺失一律写「缺失」，绝不输出 undefined/NaN（题目红线：不得静默省略）。 */
 function cell(v: number | undefined, render: (n: number) => string): string {
   return v === undefined ? '缺失' : render(v);
-}
-
-function utcDate(ms: number): string {
-  if (!ms || Number.isNaN(ms)) return '时点缺失';
-  const d = new Date(ms);
-  const p = (n: number) => String(n).padStart(2, '0');
-  return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())}`;
 }
 
 interface RefLike {
@@ -154,41 +144,32 @@ function asObj(v: unknown): RefLike {
  * 绝不抛异常：payload 形状不可预期（网关演进/降级数据），抽屉必须始终能开出内容。
  */
 export function summarizeRef(payload: unknown, kind: string): RefSummary {
-  const p = asObj(payload);
-  const nested = asObj(p.data);
-
+  // 形状适配统一走 lib/payload-fields.ts（单一事实来源，Standard 轴评审 #7）
   if (kind === 'snapshot') {
-    const name = typeof nested.name === 'string' ? nested.name : undefined;
-    const code = typeof nested.thscode === 'string' ? nested.thscode : undefined;
-    const title = [name, code].filter(Boolean).join(' ') || '行情快照';
+    const d = readSnapshot(payload);
+    const title = [d.name, d.thscode].filter(Boolean).join(' ') || '行情快照';
     return {
       title,
       fields: [
-        { label: '最新价', value: cell(num(nested.last_price), (n) => `${n} 元`), mono: true },
+        { label: '最新价', value: cell(d.lastPrice, (n) => `${n} 元`), mono: true },
         {
           label: '涨跌幅',
-          value: cell(num(nested.price_change_ratio_pct), (n) => `${n >= 0 ? '+' : ''}${n.toFixed(2)}%`),
+          value: cell(d.changePct, (n) => `${n >= 0 ? '+' : ''}${n.toFixed(2)}%`),
           mono: true,
           // A 股惯例：红涨绿跌
-          tone: (() => {
-            const v = num(nested.price_change_ratio_pct);
-            if (v === undefined || v === 0) return undefined;
-            return v > 0 ? 'up' : 'down';
-          })(),
+          tone: d.changePct === undefined || d.changePct === 0 ? undefined : d.changePct > 0 ? 'up' : 'down',
         },
-        { label: '成交额', value: cell(num(nested.turnover), toYi), mono: true },
-        { label: 'PE(TTM)', value: cell(num(nested.pe_ttm), (n) => n.toFixed(2)), mono: true },
-        { label: 'PB(MRQ)', value: cell(num(nested.pb_mrq), (n) => n.toFixed(2)), mono: true },
+        { label: '成交额', value: cell(d.turnover, toYi), mono: true },
+        { label: 'PE(TTM)', value: cell(d.peTtm, (n) => n.toFixed(2)), mono: true },
+        { label: 'PB(MRQ)', value: cell(d.pbMrq, (n) => n.toFixed(2)), mono: true },
       ],
     };
   }
 
   if (kind === 'financials') {
-    // 真机 payload 同时有顶层与 data 内字段，顶层优先（网关契约如此）
-    const pick = (k: 'baseRevenue' | 'netMargin' | 'grossMargin' | 'taxRate') =>
-      num(p[k]) ?? num(nested[k]);
-    const basis = (typeof p.revenueBasis === 'string' ? p.revenueBasis : undefined) ??
-      (typeof nested.revenueBasis === 'string' ? nested.revenueBasis : undefined);
+    const f = readFinancials(payload);
+    const pick = (k: 'baseRevenue' | 'netMargin' | 'grossMargin' | 'taxRate') => f[k];
+    const basis = f.revenueBasis;
     return {
       title: '财务参数',
       fields: [
@@ -206,39 +187,36 @@ export function summarizeRef(payload: unknown, kind: string): RefSummary {
           value: cell(pick('taxRate'), (n) => `${n.toFixed(2)}%（Σ所得税费用 ÷ Σ税前利润）`),
           mono: true,
         },
-        {
-          label: '报告期',
-          value: typeof nested.report === 'string' ? nested.report : '缺失',
-          mono: true,
-        },
+        { label: '报告期', value: f.report ?? '缺失', mono: true },
       ],
     };
   }
 
   if (kind === 'announcements') {
-    const items = Array.isArray(p.items) ? (p.items as Array<Record<string, unknown>>) : [];
+    const ann = readAnnouncements(payload);
+    const items = ann.items;
     // 真空期：必须显式说明「未返回结果」，不得留空让人误以为没查到
-    if (p.vacuum === true || items.length === 0) {
+    if (ann.vacuum) {
       return {
         title: '公告检索 · 未返回结果',
         fields: [
           { label: '检索状态', value: '信息真空期：本轮检索未返回任何公告或新闻' },
-          { label: '检索时点', value: utcDate(num(p.asOf) ?? 0), mono: true },
+          { label: '检索时点', value: utcDate(ann.asOf), mono: true },
         ],
       };
     }
     return {
       title: `公告检索 · 命中 ${items.length} 条`,
       fields: items.slice(0, 10).map((it, i) => ({
-        label: typeof it.date === 'string' ? it.date : `第 ${i + 1} 条`,
-        value: typeof it.title === 'string' ? it.title : '（标题缺失）',
+        label: it.date ?? `第 ${i + 1} 条`,
+        value: it.title ?? '（标题缺失）',
       })),
     };
   }
 
   // 未知形状：仍然给出可读输出，不抛异常
   return {
-    title: typeof p.source === 'string' ? p.source : '未知数据源',
+    title: str(asObj(payload).source) ?? '未知数据源',
     fields: [{ label: '说明', value: '该存证的形状无法归类，请在原始 JSON 中查看' }],
   };
 }
