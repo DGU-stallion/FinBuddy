@@ -21,7 +21,7 @@ npm run test:compliance   # 合规测试集（需要 dev server）
 
 | 命令 | 结果 |
 |---|---|
-| `npx vitest run` | **Test Files 29 passed (29)；Tests 312 passed \| 2 skipped (314)** |
+| `npx vitest run` | **Test Files 35 passed (35)；Tests 366 passed \| 2 skipped (368)** |
 | `npx tsc --noEmit` | 干净（无输出） |
 | `npm run build` | ✓ Compiled successfully |
 | `node scripts/compliance-suite.mjs` | **6/6 通过，exit 0**（2026-10-13 早间，余额充足时） |
@@ -62,33 +62,35 @@ npm run test:compliance   # 合规测试集（需要 dev server）
 
 | 层 | 位置 | 数量 | 证明什么 | 不能证明什么 |
 |---|---|---|---|---|
-| 纯逻辑单测 | `lib/*.test.ts` | 22 个文件 | 校验器/公式**本身**正确（真空期判定、公式精度、词表消歧） | 模型是否照做；UI 是否渲染对 |
-| 组件测试 (jsdom) | `components/*.test.tsx` | 3 个文件 / 25 项 | 渲染与**交互**（编造角标不可点击、拖滑块零 fetch） | 真实浏览器布局/样式 |
+| 纯逻辑单测 | `lib/*.test.ts` | 24 个文件 | 校验器/公式**本身**正确（真空期判定、公式精度、词表消歧） | 模型是否照做；UI 是否渲染对 |
+| 组件测试 (jsdom) | `components/*.test.tsx` | 7 个文件 / 56 项 | 渲染与**交互**（编造角标不可点击、拖滑块零 fetch） | 真实浏览器布局/样式 |
 | 离线端到端 | `tests/route-offline.test.ts` | 12 项 | **路由编排**（mock 模型，零余额依赖） | 模型真实输出质量 |
 | 真机端到端 | `tests/agent-contract.integration.test.ts`、`tests/gateway.integration.test.ts` | 4 项 | 契约在**真实模型 + 真实数据源**下是否成立 | 可复现性（受余额/网络影响） |
-| 真实输出回归 | `tests/fixtures/*` + `tests/real-*.test.ts` | 14 项 | 冻结真实输出，**防止解析逻辑退化** | 新场景（fixture 是历史快照） |
+| 真实输出回归 | `tests/fixtures/*` + `tests/real-*.test.ts` | 17 项 | 冻结真实输出，**防止解析逻辑退化** | 新场景（fixture 是历史快照） |
 
 ### 测试文件清单（实际用例数，2026-10-13）
 
 ```
+lib/evidence.test.ts                 22     lib/vocabulary.test.ts               22
 lib/analysis-prompt.test.ts          21     lib/sensitivity.test.ts              20
-lib/evidence.test.ts                 22     lib/message-view.test.ts             18
-lib/context-summary.test.ts          18     lib/output-contract.test.ts          18
-lib/vocabulary.test.ts               22     lib/compliance.test.ts               16
-lib/analysis.test.ts                 15     lib/followups.test.ts                12
-lib/orchestration.test.ts            11     lib/ticker.test.ts                   10
-lib/citations.test.ts                 9     lib/preset-cases.test.ts              9
-lib/refs.test.ts                      8     lib/intent.test.ts                    7
+lib/context-summary.test.ts          18     lib/message-view.test.ts             18
+lib/output-contract.test.ts          18     lib/markdown.test.ts                 16
+lib/compliance.test.ts               16     lib/analysis.test.ts                 15
+lib/followups.test.ts                12     lib/orchestration.test.ts            11
+lib/ticker.test.ts                   10     lib/citations.test.ts                 9
+lib/preset-cases.test.ts              9     lib/intent.test.ts                    7
 lib/gateway.test.ts                   6     lib/financials.test.ts                5
 lib/format.test.ts                    4
 
-components/IntentTags.test.tsx       11     components/CitationText.test.tsx      7
-components/SensitivityCard.test.tsx   7
+components/EvidenceDrawer.test.tsx   11     components/IntentTags.test.tsx       11
+components/CitationText.test.tsx      7     components/ComplianceNotice.test.tsx  7
+components/EvidenceColumns.test.tsx   7     components/SensitivityCard.test.tsx   7
+components/ThinkingTimeline.test.tsx  6
 
-tests/route-offline.test.ts          12     tests/real-t4-regression.test.ts     10
-tests/fallback-chain.test.ts          5     tests/real-output-regression.test.ts  4
-tests/vacuum-chain.test.ts            3     tests/agent-contract.integration.ts   2 (真机)
-tests/gateway.integration.test.ts     2 (真机)
+tests/real-t4-regression.test.ts     13     tests/route-offline.test.ts          12
+tests/fallback-chain.test.ts          5     tests/demo-script-check.test.tsx      4
+tests/real-output-regression.test.ts  4     tests/vacuum-chain.test.ts            3
+tests/agent-contract.integration.ts   2 (真机)  tests/gateway.integration.test.ts  2 (真机)
 ```
 
 ---

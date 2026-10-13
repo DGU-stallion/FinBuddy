@@ -109,7 +109,7 @@ app/
   page.tsx                    问财式工作台（渲染 + 交互编排）
   api/chat/route.ts           Agent 编排（合规 → 计划 → 工具循环 → 契约）
   layout.tsx / globals.css    视觉规范（深色金融终端）
-components/                   UI 组件（每个都有 jsdom 单测）
+components/                   UI 组件（7 个组件，每个都有 jsdom 单测）
 lib/                          纯逻辑模块（Seam 1..13，见下）
 scripts/                      真机验证脚本
 tests/                       集成 / 离线端到端 / 真实输出回归
@@ -180,8 +180,8 @@ npm run test:compliance   # 合规测试集（打真实 /api/chat）
 当前状态（2026-10-13）：
 
 ```
-Test Files  29 passed (29)
-Tests       312 passed | 2 skipped (314)
+Test Files  35 passed (35)
+Tests       366 passed | 2 skipped (368)
 tsc --noEmit  干净
 next build    Compiled successfully
 ```
@@ -270,6 +270,8 @@ npx tsx scripts/t5-verify.mts                   # 两个预置案例的测算参
 |---|---|
 | `TESTING.md` | 测试策略、如何复现、每条断言在证明什么 |
 | `AI-USAGE.md` | AI 工具使用记录与人工纠偏记录 |
+| `DEMO.md` | 90 秒录屏分镜脚本（含画面验收点与排查表） |
+| `DEPLOY.md` | 部署步骤、平台选择权衡、部署后必验 4 项 |
 | `docs/adr/0001-financial-correctness-guardrails.md` | 测算口径、真空期硬编码、L2 降级边界 |
 | `docs/adr/0002-compliance-and-evidence-integrity.md` | 合规双保险、角标强制校验、抽屉双层 |
 | `GLOSSARY.md` | 领域术语表 |
