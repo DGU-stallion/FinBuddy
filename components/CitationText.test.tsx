@@ -35,7 +35,7 @@ describe('CitationText', () => {
 
   it('点击失效角标不会触发存证抽屉（onOpenRef 不被调用）', () => {
     const onOpen = vi.fn();
-    render(<CitationText text="官方已澄清[^ref_7]" allowedRefIds={['ref_1']} onOpenRef={onOpen} messageId="m1" />);
+    render(<CitationText text="官方已澄清[^ref_7]" allowedRefIds={['ref_1']} onOpenRef={onOpen} messageId="m1" refsSettled />);
     fireEvent.click(screen.getByLabelText(/引用失效 ref_7/));
     expect(onOpen).not.toHaveBeenCalled();
   });
@@ -57,10 +57,35 @@ describe('CitationText', () => {
     expect(screen.getByLabelText(/引用失效 ref_9/)).toBeDefined();
   });
 
-  it('工具全挂（无 refId）时任何角标都失效', () => {
-    render(<CitationText text="数据显示增长[^ref_1]" allowedRefIds={[]} onOpenRef={() => {}} messageId="m1" />);
+  it('工具全挂且存证集合已确定 → 任何角标都失效', () => {
+    render(
+      <CitationText
+        text="数据显示增长[^ref_1]"
+        allowedRefIds={[]}
+        onOpenRef={() => {}}
+        messageId="m1"
+        refsSettled
+      />,
+    );
     expect(screen.queryAllByRole('button')).toHaveLength(0);
     expect(screen.getByLabelText(/引用失效 ref_1/)).toBeDefined();
+  });
+
+  it('流式期间集合未到达 → 显示"存证校验中"，不误报"引用失效"', () => {
+    // 依据：data-refs 在流结束后才写入，若此时判 invalid，
+    // 流式期间所有**合法**角标都会显示为"引用失效"（真机可见约 20s）。
+    render(
+      <CitationText
+        text="数据显示增长[^ref_1]"
+        allowedRefIds={[]}
+        onOpenRef={() => {}}
+        messageId="m1"
+        refsSettled={false}
+      />,
+    );
+    expect(screen.queryAllByRole('button')).toHaveLength(0);
+    expect(screen.getByLabelText(/存证校验中 ref_1/)).toBeDefined();
+    expect(screen.queryByLabelText(/引用失效 ref_1/)).toBeNull();
   });
 
   it('正文文本完整保留（不因切 token 丢字）', () => {

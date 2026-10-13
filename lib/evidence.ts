@@ -19,19 +19,45 @@ export type EvidenceColumnName = (typeof EVIDENCE_COLUMNS)[number];
 
 const CITATION_RE = /\[\^(ref_\d+)\]/g;
 
-/** 正文 token：纯文本 或 已判定有效性的角标。 */
+/**
+ * 角标状态：
+ * - `valid`：命中本轮工具返回集合 → 可点击滑出存证抽屉。
+ * - `invalid`：集合**已确定**且未命中 → 灰色"引用失效"，不可点击（红线）。
+ * - `pending`：集合**尚未到达**（流式进行中）→ 显示为"校验中"，不可点击。
+ *
+ * 为什么要区分 pending 与 invalid（T4 Spec 轴评审指出）：
+ * data-refs 在 `consumeStream()` 之后才写入，而正文在流中逐字到达。
+ * 若集合未到就判 invalid，则流式期间（真机约 20s）**所有合法角标**都显示为
+ * 灰色删除线的"引用失效"，流结束才整体翻蓝 —— 演示时肉眼可见，
+ * 容易被误读为校验误报。
+ *
+ * 注意这不是"放宽校验"：pending 同样**不可点击**，且集合一旦到达，
+ * 未命中者立刻判 invalid。红线（编造必失效）没有任何松动。
+ */
+export type CitationStatus = 'valid' | 'invalid' | 'pending';
+
+/** 正文 token：纯文本 或 带状态判定的角标。 */
 export type CitationToken =
   | { type: 'text'; value: string }
-  | { type: 'citation'; refId: string; valid: boolean };
+  | { type: 'citation'; refId: string; valid: boolean; status: CitationStatus };
 
 /**
- * 把正文切成 token 序列，并为每个角标判定有效性。
+ * 把正文切成 token 序列，并为每个角标判定状态。
  *
  * @param text 模型正文
  * @param allowedRefIds 本轮工具实际返回过的 refId 集合
+ * @param opts.refsSettled 集合是否已确定（流式结束/已收到 data-refs）。
+ *   为 false 且集合为空时，角标标为 pending（"校验中"）而非 invalid。
+ *   集合非空时一律按确定态判定（已能判命中与否）。
  */
-export function tokenizeCitations(text: string, allowedRefIds: readonly string[]): CitationToken[] {
+export function tokenizeCitations(
+  text: string,
+  allowedRefIds: readonly string[],
+  opts: { refsSettled?: boolean } = {},
+): CitationToken[] {
   const allowed = new Set(allowedRefIds);
+  // 集合为空且未确定 → 无依据判定，标 pending（不误报失效）
+  const pendingMode = allowed.size === 0 && opts.refsSettled !== true;
   const tokens: CitationToken[] = [];
   let last = 0;
 
@@ -41,7 +67,9 @@ export function tokenizeCitations(text: string, allowedRefIds: readonly string[]
   for (const m of text.matchAll(CITATION_RE)) {
     const idx = m.index ?? 0;
     if (idx > last) tokens.push({ type: 'text', value: text.slice(last, idx) });
-    tokens.push({ type: 'citation', refId: m[1], valid: allowed.has(m[1]) });
+    const hit = allowed.has(m[1]);
+    const status: CitationStatus = hit ? 'valid' : pendingMode ? 'pending' : 'invalid';
+    tokens.push({ type: 'citation', refId: m[1], valid: hit, status });
     last = idx + m[0].length;
   }
   if (last < text.length) tokens.push({ type: 'text', value: text.slice(last) });

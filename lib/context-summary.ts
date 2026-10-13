@@ -186,6 +186,11 @@ export function buildContextSummary(messages: readonly MessageLike[]): ContextSu
       } else {
         lines.push('已确认事实：无（上一轮未取得可回溯数据）');
       }
+      // 边界必须显式声明（T4 Spec 轴评审指出）：摘要**仅含最近一轮**的事实。
+      // 不声明的话，模型会以为自己掌握了会话全部历史，在追问时凭印象陈述早期结论
+      // —— 那正是 hallucination 的温床。宁可告诉它"我不知道更早的事"。
+      lines.push('范围限制：以上事实**仅含最近一轮**核验所得，不含更早轮次的事实；');
+      lines.push('若需引用更早轮次的结论，请重新调用工具核验，不要凭记忆陈述。');
       lines.push('注意：以上为结构化摘要，不含完整对话历史；如需新事实请重新调用工具核验。');
       return lines.join('\n');
     },

@@ -291,3 +291,39 @@ describe('summarizeRef · 税率来源标注（不得让推导值冒充接口字
     expect(tax!.value).toBe('缺失');
   });
 });
+
+describe('流式期间角标状态：待校验 ≠ 引用失效（T4 Spec 轴评审指出）', () => {
+  // 背景：data-refs 在 consumeStream() 之后才写入，而正文逐字到达。
+  // 结果：流式期间（真机约 20s）所有合法角标都显示为灰色删除线的"引用失效"，
+  // 流结束才整体翻蓝。演示时肉眼可见，容易被评委误读为校验误报。
+  //
+  // 修法不是"放宽校验"（那会让编造角标漏网），而是增加一个明确的**中间态**：
+  // 集合尚未到达时标为 pending（"校验中"），只有确实拿到了集合且不在其中
+  // 才判 invalid。这样既不放宽红线，也不再误导。
+  it('集合未到达（流式中）时标记为 pending，而非 invalid', () => {
+    const toks = tokenizeCitations('营收 1245 亿[^ref_1]。', []).filter((t) => t.type === 'citation');
+    expect(toks[0]).toMatchObject({ refId: 'ref_1', status: 'pending' });
+  });
+
+  it('集合已到达且命中 → valid', () => {
+    const toks = tokenizeCitations('营收[^ref_1]', ['ref_1']).filter((t) => t.type === 'citation');
+    expect(toks[0]).toMatchObject({ refId: 'ref_1', status: 'valid' });
+  });
+
+  it('集合已到达但未命中 → invalid（红线不变：编造必须判失效）', () => {
+    const toks = tokenizeCitations('编造[^ref_7]', ['ref_1']).filter((t) => t.type === 'citation');
+    expect(toks[0]).toMatchObject({ refId: 'ref_7', status: 'invalid' });
+  });
+
+  it('空正文集合且**已确认本轮无工具返回**时才是 invalid（终态）', () => {
+    // 终态判定：调用方传 allowPending=false 表示"集合已定，不会再变"
+    const toks = tokenizeCitations('x[^ref_1]', [], { refsSettled: true }).filter((t) => t.type === 'citation');
+    expect(toks[0]).toMatchObject({ refId: 'ref_1', status: 'invalid' });
+  });
+
+  it('pending 与 invalid 不得混淆（hasAny/valid/invalid 仍只统计确定态）', () => {
+    const toks = tokenizeCitations('a[^ref_1] b[^ref_2]', ['ref_1']);
+    const cites = toks.filter((t) => t.type === 'citation');
+    expect(cites.map((c) => (c as { status: string }).status)).toEqual(['valid', 'invalid']);
+  });
+});

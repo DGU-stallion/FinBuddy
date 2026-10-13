@@ -230,3 +230,51 @@ describe('selectCurrentTurn（只把当前轮交给模型，历史靠摘要）',
     expect(selectCurrentTurn(msgs as never)).toEqual(selectCurrentTurn(msgs as never));
   });
 });
+
+describe('摘要边界必须显式声明（T4 Spec 轴评审缺陷）', () => {
+  it('明确告知"仅含最近一轮"事实，避免模型误以为掌握全部历史', () => {
+    // 设计取舍：只带最近一轮的已确认事实（避免跨轮混用与 token 膨胀）。
+    // 但该边界**必须写进摘要**——否则模型会以为自己掌握了会话全部事实，
+    // 在追问时凭印象陈述早期结论（那正是 hallucination 的温床）。
+    const s = buildContextSummary([
+      msg('assistant', [
+        { type: 'data-plan', data: { reframedClaim: '命题A', intentTags: ['标的: 中际旭创'], subQuestions: [] } },
+      ]),
+    ] as never)!;
+    expect(s.toPromptText()).toMatch(/仅含|只含|最近一轮/);
+  });
+
+  it('有多轮历史时，摘要不含更早轮次的事实（但声明了这一点）', () => {
+    const turn = (id: string, refId: string, name: string) => ({
+      id,
+      role: 'assistant',
+      parts: [
+        { type: 'data-plan', data: { reframedClaim: `${name}命题`, intentTags: [`标的: ${name}`], subQuestions: [] } },
+        {
+          type: 'data-refs',
+          data: { refs: [{ refId, kind: 'snapshot', payload: { refId, data: { name, last_price: 1 } } }] },
+        },
+      ],
+    });
+
+    const s = buildContextSummary([
+      turn('a1', 'ref_1', '中际旭创'),
+      turn('a2', 'ref_1', '宁德时代'),
+    ] as never)!;
+
+    const t = s.toPromptText();
+    // 标的取最近一轮（设计如此）
+    expect(s.subject).toBe('宁德时代');
+    // 更早轮次的事实不在场，但必须有边界声明
+    expect(t).toMatch(/仅含|只含|最近一轮/);
+  });
+
+  it('确定性：同输入同输出', () => {
+    const messages = [
+      msg('assistant', [{ type: 'data-plan', data: { reframedClaim: 'x', intentTags: ['标的: A'], subQuestions: [] } }]),
+    ];
+    expect(buildContextSummary(messages as never)!.toPromptText()).toBe(
+      buildContextSummary(messages as never)!.toPromptText(),
+    );
+  });
+});

@@ -29,6 +29,8 @@ export interface FinancialsPayload {
   source: string;
   asOf: number;
   isFallback: boolean;
+  /** L2 降级时的抓取说明（与 SnapshotPayload 对称）。 */
+  fallbackNote?: string;
   data: {
     thscode?: string;
     report?: string;
@@ -84,7 +86,11 @@ export function formatFinancialsForLLM(p: FinancialsPayload): string {
   lines.push(`数据来源：${p.source}`);
   lines.push(`数据时点：${fmtDate(p.asOf)}`);
   if (p.isFallback) {
-    lines.push(`⚠️ 降级存证：当前为历史存证数据，非最新报告期。`);
+    lines.push(
+      `⚠️ 降级存证：外部实时接口不可用，当前为历史存证数据，非最新报告期${
+        p.fallbackNote ? `（${p.fallbackNote}）` : ''
+      }。`,
+    );
   }
   lines.push(`报告期：${d.report ?? '缺失'}`);
   lines.push(

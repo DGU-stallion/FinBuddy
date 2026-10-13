@@ -1,8 +1,9 @@
 import { describe, it, expect, vi } from 'vitest';
-import { lookupStockSnapshot } from '@/lib/gateway';
+import { lookupStockSnapshot, lookupFinancialReport } from '@/lib/gateway';
 import { validateAnalysisOutput } from '@/lib/output-contract';
 import { formatSnapshotForLLM } from '@/lib/format';
 import { listFallbackCases } from '@/lib/fallback';
+import { computeSensitivity } from '@/lib/sensitivity';
 
 /**
  * T3 缺口补齐：L2 降级 → 正文"非实时 + 抓取日期"声明链路
@@ -129,5 +130,67 @@ x
 
   it('非预置案例不降级：上游失败直接抛错（自由查询不走 L2）', async () => {
     await expect(lookupStockSnapshot('600519.SH', 'ref_1', FUYAO_DOWN)).rejects.toThrow();
+  });
+});
+
+describe('L2 降级 → 财务参数（T5 测算卡片在断网时仍可用）', () => {
+  it('扶摇不可用时预置案例财务参数降级，且带 isFallback 与抓取说明', async () => {
+    const fin = await lookupFinancialReport(PRESET.thscode, 'ref_1', FUYAO_DOWN);
+    expect(fin.isFallback).toBe(true);
+    expect(fin.fallbackNote).toBeTruthy();
+    // 测算所需的三个参数都在 → 断网也能渲染测算卡片
+    expect(Number.isFinite(fin.baseRevenue)).toBe(true);
+    expect(Number.isFinite(fin.netMargin)).toBe(true);
+    expect(Number.isFinite(fin.taxRate)).toBe(true);
+    expect(fin.revenueBasis).toBe('TTM');
+  });
+
+  it('降级财务数据能驱动测算引擎（公式可用，非"不可测算"）', async () => {
+    const fin = await lookupFinancialReport(PRESET.thscode, 'ref_1', FUYAO_DOWN);
+    const r = computeSensitivity({
+      baseRevenue: fin.baseRevenue,
+      netMargin: fin.netMargin,
+      taxRate: fin.taxRate,
+      declinePct: 20,
+    });
+    expect(r.ok).toBe(true);
+    if (!r.ok) throw new Error('unreachable');
+    expect(r.impact).toBeGreaterThan(0);
+  });
+
+  it('降级财务数据未在正文声明时，契约报 missing_fallback_disclosure', async () => {
+    const fin = await lookupFinancialReport(PRESET.thscode, 'ref_1', FUYAO_DOWN);
+    const text = [
+      '【命题重构】命题',
+      '【支持证据】营收见存证[^ref_1]。', // 未声明"非实时"与日期
+      '【反对证据】x',
+      '【无法验证项】y',
+    ].join('\n');
+    const check = validateAnalysisOutput(text, {
+      refIds: [fin.refId],
+      fallbackRefs: [{ refId: fin.refId, asOf: fin.asOf, note: fin.fallbackNote }],
+      vacuumSubQuestions: [],
+    });
+    expect(check.violations.map((v) => v.code)).toContain('missing_fallback_disclosure');
+  });
+
+  it('声明了"非实时"与抓取日期后契约通过', async () => {
+    const fin = await lookupFinancialReport(PRESET.thscode, 'ref_1', FUYAO_DOWN);
+    const text = [
+      '【命题重构】命题',
+      `【支持证据】营收（非实时数据，抓取日期 ${utcDate(fin.asOf)}）见存证[^ref_1]。`,
+      '【反对证据】x',
+      '【无法验证项】y',
+    ].join('\n');
+    const check = validateAnalysisOutput(text, {
+      refIds: [fin.refId],
+      fallbackRefs: [{ refId: fin.refId, asOf: fin.asOf, note: fin.fallbackNote }],
+      vacuumSubQuestions: [],
+    });
+    expect(check.violations.map((v) => v.code)).not.toContain('missing_fallback_disclosure');
+  });
+
+  it('非预置标的财务查询失败时**不**降级，直接抛错（自由查询不得走 L2）', async () => {
+    await expect(lookupFinancialReport('600519.SH', 'ref_1', FUYAO_DOWN)).rejects.toThrow();
   });
 });

@@ -17,7 +17,11 @@ import { callFuyaoTool } from './fuyao';
 import { callIfindTool } from './ifind';
 import { sumTTM, effectiveTaxRate, type QuarterlyIncome, type RevenueBasis } from './financials';
 import type { SnapshotPayload, FinancialsPayload } from './format';
-import { getFallbackSnapshot, type FallbackRecord } from './fallback';
+import {
+  getFallbackSnapshot,
+  getFallbackFinancials,
+  type FallbackRecord,
+} from './fallback';
 
 /** 可注入的调用器，便于在降级 seam 上测试（默认用真实实现）。 */
 export interface GatewayDeps {
@@ -156,11 +160,43 @@ export async function lookupFinancialReport(
   refId: string,
   deps: GatewayDeps = defaultDeps,
 ): Promise<FinancialsResult> {
-  const income = await deps.fuyao<IncomeData>('get_a_share_financials_income_statements', {
-    thscode,
-    period: 'quarterly',
-    limit: 5,
-  });
+  // L2 降级（ADR-0001 决策 3）：仅预置案例。财务参数原本**没有**降级分支，
+  // 导致断网演示时测算卡片直接消失（恰在 L2 存在的理由下失效）。
+  // 自由查询仍不走 L2 —— 由 getFallbackFinancials 返回 null 自然落到 L3。
+  let income: IncomeData;
+  try {
+    income = await deps.fuyao<IncomeData>('get_a_share_financials_income_statements', {
+      thscode,
+      period: 'quarterly',
+      limit: 5,
+    });
+  } catch (e) {
+    const fb = getFallbackFinancials(thscode);
+    if (fb) {
+      return {
+        refId,
+        source: fb.source,
+        asOf: fb.asOf,
+        isFallback: true,
+        fallbackNote: fb.note,
+        baseRevenue: fb.baseRevenue,
+        revenueBasis: fb.revenueBasis,
+        netMargin: fb.netMargin,
+        grossMargin: fb.grossMargin,
+        taxRate: fb.taxRate,
+        data: {
+          thscode: fb.thscode,
+          report: fb.report,
+          baseRevenue: fb.baseRevenue,
+          revenueBasis: fb.revenueBasis,
+          netMargin: fb.netMargin,
+          grossMargin: fb.grossMargin,
+          taxRate: fb.taxRate,
+        },
+      };
+    }
+    throw e;
+  }
 
   const periods: QuarterlyIncome[] = (income.item ?? []).map((it) => ({
     fiscalYear: it.fiscal_year ?? 0,

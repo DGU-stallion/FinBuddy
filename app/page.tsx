@@ -279,6 +279,7 @@ export default function WorkbenchPage() {
                       onOpenRef={(refId, messageId) => setOpenRef({ refId, messageId })}
                       messageId={v.messageId}
                       compressed={openRefId !== null}
+                      streaming={v.streaming}
                     />
                   )}
 

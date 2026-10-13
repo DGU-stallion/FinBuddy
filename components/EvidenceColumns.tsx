@@ -29,11 +29,13 @@ function Inline({
   allowed,
   onOpenRef,
   messageId,
+  refsSettled,
 }: {
   tokens: InlineToken[];
   allowed: readonly string[];
   onOpenRef: (refId: string, messageId: string) => void;
   messageId: string;
+  refsSettled?: boolean;
 }) {
   return (
     <>
@@ -46,6 +48,7 @@ function Inline({
               allowedRefIds={allowed}
               onOpenRef={onOpenRef}
               messageId={messageId}
+              refsSettled={refsSettled}
             />
           </strong>
         ) : (
@@ -55,6 +58,7 @@ function Inline({
             allowedRefIds={allowed}
             onOpenRef={onOpenRef}
             messageId={messageId}
+            refsSettled={refsSettled}
           />
         ),
       )}
@@ -69,6 +73,8 @@ export function EvidenceColumns({
   messageId,
   /** 抽屉打开时压缩栏宽（spec：滑出时三栏流式压缩，证据与出处同屏对照）。 */
   compressed,
+  /** 本轮是否仍在流式（false 表示存证集合已确定 → 未知角标才判"失效"）。 */
+  streaming,
 }: {
   text: string;
   refs: readonly RefEntry[];
@@ -76,7 +82,10 @@ export function EvidenceColumns({
   /** 本栏所属轮次的消息 id（跨轮存证隔离，见 app/page.tsx 的 drawerRefs）。 */
   messageId: string;
   compressed?: boolean;
+  streaming?: boolean;
 }) {
+  // 流式期间集合未定：未知角标标 pending（"校验中"）而非"引用失效"。
+  const refsSettled = !streaming;
   const columns = splitEvidence(text);
   const allowed = refs.map((r) => r.refId);
 
@@ -120,7 +129,13 @@ export function EvidenceColumns({
                     {line.type === 'li' && (
                       <span className="absolute left-0 text-slate-600">•</span>
                     )}
-                    <Inline tokens={line.token} allowed={allowed} onOpenRef={onOpenRef} messageId={messageId} />
+                    <Inline
+                      tokens={line.token}
+                      allowed={allowed}
+                      onOpenRef={onOpenRef}
+                      messageId={messageId}
+                      refsSettled={refsSettled}
+                    />
                   </li>
                 ))}
               </ul>
