@@ -51,7 +51,9 @@ export function EvidenceDrawer({
   return (
     <aside
       aria-hidden={!open}
-      className={`fixed right-0 top-0 z-40 h-full w-[380px] transform border-l border-slate-800 bg-slate-950/98 shadow-2xl backdrop-blur transition-transform duration-300 ${
+      // 用 /95 而非 /98：Tailwind 默认 opacity 档位止于 95/100，/98 不在档位内
+      // 会被**静默丢弃** → 抽屉完全没有背景色（真缺陷，守卫见 tailwind-classes.test.ts）
+      className={`fixed right-0 top-0 z-40 h-full w-[380px] transform border-l border-slate-800 bg-slate-950/95 shadow-2xl backdrop-blur transition-transform duration-300 ${
         open ? 'translate-x-0' : 'translate-x-full'
       }`}
     >

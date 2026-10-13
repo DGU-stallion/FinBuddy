@@ -50,6 +50,35 @@ npm run dev               # http://localhost:3000
 
 打开首页点任一**预置案例**即可走完整链路（无需自己输入）。
 
+### ⚠️ 页面"只有文字没有样式/交互"时怎么办
+
+**症状**：浏览器里只有裸文字，没有配色、卡片、按钮样式，点预置案例没反应。
+
+**原因**：`.next` 构建缓存损坏，导致 Tailwind 生成的 CSS 请求返回 **404**。
+最常见触发方式：**在一个正在 `npm run dev` 的目录里又跑了 `npm run build`** ——
+dev 与 production 都要写 `.next/`，产物互相污染后会看到
+`__webpack_modules__[moduleId] is not a function` 之类的报错。
+
+**修法**（一条命令）：
+
+```bash
+npm run clean && npm run dev     # 等价于 rm -rf .next && next dev
+# 或直接用：npm run dev:clean
+```
+
+**如何 30 秒确认是这个原因**：
+
+```bash
+# CSS 应返回 200 且体积可观（~34KB dev / ~21KB prod）；若是 404 即是此问题
+curl -s -o /dev/null -w "%{http_code} %{size_download}\n" \
+  "http://localhost:3000$(curl -s localhost:3000 | grep -o '/_next/static/css/[^"]*' | head -1)"
+```
+
+> 本项目已加守卫测试 `components/tailwind-classes.test.tsx`，专门防另一类
+> **不报错的样式失效**：`bg-slate-950/98` 的 `/98` 不在 Tailwind 默认 opacity
+> 档位内（档位止于 95/100），会被**静默丢弃** —— 构建成功、lint 零警告、
+> 测试全绿，但元素没有背景色。
+
 ---
 
 ## 它能做什么
@@ -248,6 +277,9 @@ npx tsx scripts/t5-verify.mts                   # 两个预置案例的测算参
 | 11 | **有效税率被硬编码为 15%** 却与净利率并列展示 | Spec 轴评审 | 违反 ADR-0001「参数可追溯」；真机实际为 14.84%/14.54%，且逐季波动 |
 | 12 | 跨轮**存证静默错配**：点第一轮的角标显示最后一轮的 payload | Spec 轴评审 | 违反 ADR-0002 决策 4，且静默无报错，比报错更危险 |
 | 13 | 消歧修复引入**回归**：`费用杠杆`/`信用杠杆`/`利用杠杆效应` 被误判为操作指令 | Standards 轴评审 | 与 #9 同类，同样对正确输出弹告警 |
+| 14 | **非法入参返回 500 + 整段堆栈**；`messages:'nope'` 反而静默走到 200 | 充值后重跑真机测试 | 调用方错误被当成服务端故障；静默 200 更糟 |
+| 15 | **`bg-slate-950/98` 被 Tailwind 静默丢弃** → 存证抽屉完全透明 | 用户实测（"只有文字没有 UI"） | 构建成功 / lint 干净 / 测试全绿，只有人眼能发现 |
+| 16 | `.next` 缓存被 dev 与 build 交叉污染 → CSS 404，页面裸文字无交互 | 用户实测 | 验证构建时在长跑的 dev server 上跑 build 导致；已写入 README 排障段 |
 
 第 9 条特别值得说明：最初它表现为"集成测试偶尔失败"，很容易被当成负载导致的 flaky 而忽略。
 追查后发现模型写的是「固定成本**杠杆**」「经营**杠杆**」「**杠杆**水平上行」——

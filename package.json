@@ -9,7 +9,10 @@
     "lint": "next lint",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "test:compliance": "node scripts/compliance-suite.mjs"
+    "test:compliance": "node scripts/compliance-suite.mjs",
+    "clean": "rm -rf .next",
+    "dev:clean": "npm run clean && next dev",
+    "verify:deploy": "node scripts/verify-deploy.mjs"
   },
   "dependencies": {
     "@ai-sdk/openai-compatible": "^1.0.58",
