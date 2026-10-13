@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { deriveViews, streamingIdFromStatus } from '@/lib/message-view';
 import { listFallbackCases } from '@/lib/fallback';
 import { PRESET_CASES } from '@/lib/preset-cases';
+import { buildRerunText } from '@/lib/rerun';
 import { EvidenceColumns } from '@/components/EvidenceColumns';
 import { EvidenceDrawer } from '@/components/EvidenceDrawer';
 import { SensitivityCard } from '@/components/SensitivityCard';
@@ -82,12 +83,13 @@ export default function WorkbenchPage() {
   const rerunFromTags = useCallback(
     (intent: TagEditIntent) => {
       if (busy) return;
-      const base = lastView?.plan?.reframedClaim ?? lastView?.userText ?? '';
-      // 明确告知是按标签收窄后的重跑，让命题重构围绕新标签
-      const text =
-        intent.reason === 'delete'
-          ? `请按以下意图标签重新核验（已删除「${intent.tag}」）：${intent.nextTags.join('；')}。原命题：${base}`
-          : `请按修改后的意图标签重新核验：${intent.nextTags.join('；')}。原命题：${base}`;
+      // 重跑提问的构造规则在 lib/rerun.ts（已单测）。页面只管何时调用。
+      const text = buildRerunText({
+        reason: intent.reason,
+        tag: intent.tag,
+        nextTags: intent.nextTags,
+        base: lastView?.plan?.reframedClaim ?? lastView?.userText ?? '',
+      });
       setOpenRefId(null);
       sendMessage({ text });
     },

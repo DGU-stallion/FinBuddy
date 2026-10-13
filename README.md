@@ -117,7 +117,7 @@ docs/adr/                     已定决策（ADR-0001 / 0002）
 .scratch/finbuddy-agent/      spec 与分票（T1..T5）的工作记录
 ```
 
-### lib 的 14 个 seam
+### lib 的 16 个 seam
 
 每个模块开头都写明「Seam N + 设计要点」。这是刻意设计：**纯逻辑与 React 分离**，
 所以"角标怎么判定失效""多轮摘要带什么"这类核心规则可以被精确单测，而不是埋进 JSX。
@@ -138,6 +138,8 @@ docs/adr/                     已定决策（ADR-0001 / 0002）
 | 12 | `message-view.ts` | 消息 → 视图模型状态机 |
 | 13 | `preset-cases.ts` | 预置案例（从兜底存证派生，防漂移） |
 | 14 | `vocabulary.ts` | 合规词表单一事实来源 |
+| 15 | `markdown.ts` | 正文极小子集 Markdown 解析（真机正文含 `**` 与 `- `） |
+| 16 | `rerun.ts` | 标签微调后的重跑提问构造 |
 
 此外 `gateway.ts` / `fuyao.ts` / `ifind.ts` / `financials.ts` / `refs.ts` / `fallback.ts` /
 `intent.ts` 属于数据接入层，不编号。
@@ -180,8 +182,8 @@ npm run test:compliance   # 合规测试集（打真实 /api/chat）
 当前状态（2026-10-13）：
 
 ```
-Test Files  35 passed (35)
-Tests       366 passed | 2 skipped (368)
+Test Files  36 passed (36)
+Tests       374 passed | 2 skipped (376)
 tsc --noEmit  干净
 next build    Compiled successfully
 ```

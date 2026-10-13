@@ -21,7 +21,7 @@ npm run test:compliance   # 合规测试集（需要 dev server）
 
 | 命令 | 结果 |
 |---|---|
-| `npx vitest run` | **Test Files 35 passed (35)；Tests 366 passed \| 2 skipped (368)** |
+| `npx vitest run` | **Test Files 36 passed (36)；Tests 374 passed \| 2 skipped (376)** |
 | `npx tsc --noEmit` | 干净（无输出） |
 | `npm run build` | ✓ Compiled successfully |
 | `node scripts/compliance-suite.mjs` | **6/6 通过，exit 0**（2026-10-13 早间，余额充足时） |
