@@ -138,6 +138,18 @@ describe('真机集成：T3 分析契约', () => {
 
       const a = await ask('中际旭创怎么样');
 
+      // 0) 先确认**没有被合规层误拦**（真缺陷：中性问题曾约 1/5 概率被意图层拦下）
+      //
+      // 曾经的失败表现是 `plan` 为 undefined，但根因不是"计划生成失败"，
+      // 而是这一次请求走了**合规拦截分支**（不产出任何分析结构）。
+      // 直接断言这一点，失败信息才有诊断价值。
+      const complianceLayer = (a.dataParts.compliance as { layer?: string } | undefined)?.layer;
+      expect(
+        complianceLayer,
+        `「中际旭创怎么样」是中性研究性提问，却被合规层拦截（layer=${complianceLayer}）——` +
+          `用户拿不到任何分析结果。这是合规层误伤正常提问，不是测试问题。`,
+      ).toBeUndefined();
+
       // 1) 命题重构发生（T3 核心）
       const plan = a.dataParts.plan as
         | { reframedClaim?: string; intentTags?: string[]; subQuestions?: unknown[] }

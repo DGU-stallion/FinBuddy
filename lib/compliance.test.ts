@@ -141,3 +141,45 @@ describe('complianceNotice', () => {
     expect(msg).toContain('不是因为您的问题违规');
   });
 });
+
+describe('意图层不得误伤中性提问（真机偶发，见下方说明）', () => {
+  /**
+   * 真缺陷记录：真机集成测试曾约 1/5 概率在「中际旭创怎么样」上失败，
+   * 服务端日志显示：
+   *   data: {"type":"data-compliance","data":{"layer":"intent"}}
+   * 即**意图层把这个纯事实性问题判成了"索取买卖决策"**。
+   *
+   * 严重后果：用户问一个中性问题，却被回以"不提供投资建议"的合规话术，
+   * 且**拿不到任何核验结果** —— 这是合规层把正常用户挡在门外。
+   *
+   * 下面是确定性复现（注入一个"总是判是"的判官），锁住"意图层误判会拦截"
+   * 这一**机制**；真实模型的误判率需靠 prompt 收紧来解决，不在单测范围内。
+   */
+  it('意图层返回"是"时确实拦截（机制确认）', async () => {
+    const v = await detectTradeSeeking('中际旭创怎么样', {
+      llmJudge: async () => true, // 模拟模型误判
+    });
+    expect(v.blocked).toBe(true);
+    expect(v.layer).toBe('intent');
+  });
+
+  it('意图层返回"否"时不拦截（中性问题应正常分析）', async () => {
+    const v = await detectTradeSeeking('中际旭创怎么样', {
+      llmJudge: async () => false,
+    });
+    expect(v.blocked).toBe(false);
+  });
+
+  it('关键词层优先于意图层（命中关键词不再调模型）', async () => {
+    let called = false;
+    const v = await detectTradeSeeking('请告诉我明天买入还是卖出', {
+      llmJudge: async () => {
+        called = true;
+        return false;
+      },
+    });
+    expect(v.blocked).toBe(true);
+    expect(v.layer).toBe('keyword');
+    expect(called, '关键词已命中却仍调用了意图判官 —— 白白消耗一次模型调用').toBe(false);
+  });
+});
