@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "node scripts/check-safe-build.mjs && next build",
     "start": "next start",
     "lint": "next lint",
     "test": "vitest run",
@@ -13,7 +13,9 @@
     "clean": "rm -rf .next",
     "dev:clean": "npm run clean && next dev",
     "verify:deploy": "node scripts/verify-deploy.mjs",
-    "ui:shot": "node scripts/ui-screenshot.mjs"
+    "ui:shot": "node scripts/ui-screenshot.mjs",
+    "build:force": "FINBUDDY_ALLOW_BUILD_WITH_DEV=1 next build",
+    "verify:isolated": "bash scripts/verify-isolated.sh"
   },
   "dependencies": {
     "@ai-sdk/openai-compatible": "^1.0.58",
