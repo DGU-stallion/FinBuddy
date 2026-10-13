@@ -263,7 +263,23 @@ describe('离线端到端：路由编排（mock 模型）', () => {
   });
 });
 
-describe('离线端到端：工具链路与降级（mock 模型 + 真实网关）', () => {
+/**
+ * 工具链路需要**真实**网关凭据（扶摇 key）。缺凭据时显式跳过并打印原因，
+ * 绝不静默通过 —— 否则新克隆的仓库会看到"绿"，但实际什么都没验证。
+ *
+ * 注意：其余路由编排用例（多轮摘要、data part 顺序、合规分支、编造角标）
+ * 完全不依赖凭据，因此保留在本文件的第一个 describe 里照常运行。
+ */
+const HAS_GATEWAY_CREDS = Boolean(process.env.FUYAO_API_KEY);
+if (!HAS_GATEWAY_CREDS) {
+  console.warn(
+    '\n⚠️  跳过工具链路用例（离线端到端）—— 未验证。\n' +
+      '    原因：缺少 .env 中的 FUYAO_API_KEY（真实网关凭据）。\n' +
+      '    这不是通过，只是前置条件不满足。\n',
+  );
+}
+
+describe.skipIf(!HAS_GATEWAY_CREDS)('离线端到端：工具链路与降级（mock 模型 + 真实网关）', () => {
   let mock2: MockModel;
   beforeAll(async () => {
     mock2 = await startMockModel();

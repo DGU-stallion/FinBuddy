@@ -6,13 +6,25 @@ import { lookupStockSnapshot } from '../lib/gateway';
 import { formatSnapshotForLLM } from '../lib/format';
 
 // 真机集成测试：需要真实 FUYAO_API_KEY。缺失时跳过（不伪造通过）。
+//
+// 注意：.env 不入库，因此**必须容忍它不存在** —— 否则新克隆的仓库会在
+// 模块加载阶段就抛 ENOENT，连"跳过"都做不到（实测被自包含性检查抓到）。
 const envPath = path.resolve(__dirname, '../.env');
 const env = Object.fromEntries(
-  fs.readFileSync(envPath, 'utf-8').split('\n')
+  (fs.existsSync(envPath) ? fs.readFileSync(envPath, 'utf-8') : '')
+    .split('\n')
     .filter((l) => l.includes('=') && !l.trim().startsWith('#'))
     .map((l) => { const i = l.indexOf('='); return [l.slice(0, i).trim(), l.slice(i + 1).trim()]; }),
 );
 const hasKey = Boolean(env.FUYAO_API_KEY) && env.FUYAO_API_KEY.startsWith('sk-');
+
+if (!hasKey) {
+  console.warn(
+    '\n⚠️  跳过真机集成测试（tests/gateway.integration.test.ts）—— 未验证。\n' +
+      '    原因：缺少 .env 中的 FUYAO_API_KEY 或 key 格式不符。\n' +
+      '    这不是通过，只是前置条件不满足。\n',
+  );
+}
 
 describe.skipIf(!hasKey)('真机集成：标的解析 → 行情快照 → LLM 格式化', () => {
   it('中际旭创能端到端取到真实行情并格式化为带出处的文本', async () => {
