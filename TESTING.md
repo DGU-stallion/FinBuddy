@@ -22,7 +22,7 @@ npm run test:compliance   # 合规测试集（需要 dev server）
 
 | 命令 | 结果 |
 |---|---|
-| `npx vitest run` | **Test Files 36 passed (36)；Tests 374 passed \| 2 skipped (376)** |
+| `npx vitest run` | **Test Files 37 passed (37)；Tests 384 passed \| 2 skipped (386)** |
 | `npx tsc --noEmit` | 干净（无输出） |
 | `npm run build` | ✓ Compiled successfully |
 | `npm run lint` | ✓ No ESLint warnings or errors |
@@ -66,6 +66,7 @@ npm run test:compliance   # 合规测试集（需要 dev server）
 |---|---|---|---|---|
 | 纯逻辑单测 | `lib/*.test.ts` | 24 个文件 | 校验器/公式**本身**正确（真空期判定、公式精度、词表消歧） | 模型是否照做；UI 是否渲染对 |
 | 组件测试 (jsdom) | `components/*.test.tsx` | 7 个文件 / 56 项 | 渲染与**交互**（编造角标不可点击、拖滑块零 fetch） | 真实浏览器布局/样式 |
+| 整页渲染 | `tests/page-render.test.tsx` | 10 项 | **页面装配**（data part 接对组件、抽屉联动、合规分流） | 真实流式时序、CSS |
 | 离线端到端 | `tests/route-offline.test.ts` | 12 项 | **路由编排**（mock 模型，零余额依赖） | 模型真实输出质量 |
 | 真机端到端 | `tests/agent-contract.integration.test.ts`、`tests/gateway.integration.test.ts` | 4 项 | 契约在**真实模型 + 真实数据源**下是否成立 | 可复现性（受余额/网络影响） |
 | 真实输出回归 | `tests/fixtures/*` + `tests/real-*.test.ts` | 17 项 | 冻结真实输出，**防止解析逻辑退化** | 新场景（fixture 是历史快照） |
@@ -90,6 +91,7 @@ components/EvidenceColumns.test.tsx   7     components/SensitivityCard.test.tsx 
 components/ThinkingTimeline.test.tsx  6
 
 tests/real-t4-regression.test.ts     13     tests/route-offline.test.ts          12
+tests/page-render.test.tsx           10
 tests/fallback-chain.test.ts          5     tests/demo-script-check.test.tsx      4
 tests/real-output-regression.test.ts  4     tests/vacuum-chain.test.ts            3
 tests/agent-contract.integration.ts   2 (真机)  tests/gateway.integration.test.ts  2 (真机)
@@ -223,3 +225,35 @@ npx tsx scripts/t5-verify.mts                 # 两个预置案例的测算参�
       `lib/vocabulary.test.ts` 中被**显式断言为已知边界**，不假装为零。
 - [x] ~~`npm run lint` 未配置~~ → **已修复**（2026-10-13）：补充 `.eslintrc.json`
       （extends `next/core-web-vitals`）。现 `npm run lint` 通过：**No ESLint warnings or errors**。
+
+---
+
+## 变异测试：验证"测试本身有没有漏洞"
+
+测试全绿不代表测试有效 —— 断言写松了，代码坏掉它也不会响。因此对关键断言
+做过**变异测试**（故意改坏实现，确认测试会失败）：
+
+### 案例：测算卡片的装配断言
+
+`tests/page-render.test.tsx` 断言"有财务存证时必须渲染测算卡片"。
+初版只断言标题 `营收冲击推演` 出现。变异实验：把 `SensitivityCard` 改成
+**恒走"参数缺失"分支**（模拟参数注入断裂）——
+
+**初版断言仍然通过**。原因：参数缺失分支也渲染同一个标题，但它渲染的是
+"本轮未取得可测算的财务参数"，而不是滑块。也就是说，初版断言**抓不到
+"参数注入断裂"这个最可能的故障**。
+
+已加强为断言只在参数就位时出现的内容：
+
+```ts
+expect(t).toContain('营收冲击推演');
+expect(t).toContain('营收整体下滑幅度');       // 滑块标签：仅参数就位时渲染
+expect(t).toContain('参数溯源');               // 口径与 refId 标注
+expect(t).not.toContain('本轮未取得可测算的财务参数');
+```
+
+加强后重做变异：测试**正确失败**，并在输出里打出"本轮未取得可测算的财务参数"
+（正是被注入的坏状态）。
+
+**这条记录的意义**：说明本项目的测试数字不是靠松断言堆出来的。
+若没有做这次变异，`384 passed` 里会包含一条**实际无效**的断言。

@@ -182,8 +182,8 @@ npm run test:compliance   # 合规测试集（打真实 /api/chat）
 当前状态（2026-10-13）：
 
 ```
-Test Files  36 passed (36)
-Tests       374 passed | 2 skipped (376)
+Test Files  37 passed (37)
+Tests       384 passed | 2 skipped (386)
 tsc --noEmit  干净
 next build    Compiled successfully
 ```
