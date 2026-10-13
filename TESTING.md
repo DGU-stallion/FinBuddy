@@ -5,6 +5,21 @@
 
 ---
 
+## 原题要求的四类场景 → 覆盖在哪
+
+原题「测试说明」要求至少覆盖：**主链路、数据缺失/接口失败、极端或合规边界**。逐项对应：
+
+| 要求的场景 | 覆盖在哪 | 断言什么 |
+|---|---|---|
+| **主链路** | `tests/page-render.test.tsx`（13）+ `tests/route-offline.test.ts`（25）+ `tests/agent-contract.integration.test.ts`（2 真机） | 5 个 data part 齐全、三栏渲染、角标可溯源、追问 3 条 |
+| **数据缺失 / 接口失败** | `tests/fallback-chain.test.ts`（10）+ `tests/vacuum-chain.test.ts`（3）+ `lib/gateway.test.ts`（6）+ `tests/fixtures` 回归 | L1 超时/报错 → L2 预置存证（显式标注）；L2 未收录 → L3 信息真空期；不得用过期数据冒充正常结论 |
+| **接口失败（整服务不可用）** | `scripts/compliance-suite.mjs` 的 fail-closed 分支 + `lib/intent.test.ts` | 服务故障时 `layer='fail_closed'`，文案不得冤枉用户违规，且**不算合规通过** |
+| **合规边界** | `node scripts/compliance-suite.mjs`（6 例）+ `lib/compliance.test.ts`（19）+ `lib/vocabulary.test.ts`（25）+ `lib/followups.test.ts`（12） | 直接索取买卖 / 满仓搜哈 / 加五倍杠杆 → 柔性拦截；研究性提问不得误拦；追问不得含操作向 |
+| **极端值** | `lib/sensitivity.test.ts`（20）+ `components/SensitivityCard.test.tsx`（9） | 滑块 5%~30% 边界、参数缺失返回 `ok:false`（**绝不默认 0**） |
+| **静默失效（工具链层）** | `components/tailwind-classes.test.tsx`（4）+ `tests/ime-submit.test.tsx`（8）+ `tests/submit-guard.test.tsx`（7） | 不存在的 Tailwind 透明度档位、中文输入法 Enter 误提交、同 tick 连点重复提交 |
+
+详见下文「测试分层」与「几条关键断言在证明什么」。
+
 ## 一键运行
 
 ```bash
@@ -18,27 +33,29 @@ npm run test:compliance   # 合规测试集（需要 dev server）
 
 ---
 
-## 最近一次完整运行（2026-10-13）
+## 最近一次完整运行（2026-10-13，本机最终实跑）
 
 | 命令 | 结果 |
 |---|---|
-| `npx vitest run` | **Test Files 39 passed (39)；Tests 542 passed (542)** |
+| `npx vitest run` | **Test Files 46 passed (46)；Tests 557 passed (557)；0 skipped** |
 | `npx tsc --noEmit` | 干净（无输出） |
 | `npm run build` | ✓ Compiled successfully |
 | `npm run lint` | ✓ No ESLint warnings or errors |
-| `node scripts/compliance-suite.mjs` | **6/6 通过，exit 0**（2026-10-13 早间，余额充足时） |
-| `npx vitest run tests/agent-contract.integration.test.ts` | **2/2 通过**（同一时段） |
+| `node scripts/compliance-suite.mjs` | **6/6 通过，exit 0**（dev server 在跑，余额充足） |
+| `npx tsx scripts/t5-verify.mts` | 两个预置案例均 `contract.ok=true`、三栏齐全、参数注入成功 |
 
-### 关于那 2 个 skipped —— 重要
+### 关于真机测试：本次 0 skipped，但跳过机制仍然存在且必须保留
 
-它们是 `tests/agent-contract.integration.test.ts` 的两项**真机**测试，需要同时满足：
+`tests/agent-contract.integration.test.ts`（2 项）与 `tests/gateway.integration.test.ts`（2 项）
+是**真机**测试，需同时满足：
 
 1. `.env` 里有 `DEEPSEEK_API_KEY` / `FUYAO_API_KEY`
 2. dev server 在 `FINBUDDY_BASE_URL`（默认 `http://127.0.0.1:3000`）运行
-3. 模型服务可用
+3. 模型服务可用（余额充足）
 
-最近一次全量运行时 **DeepSeek 账户余额耗尽**（`/user/balance` 返回
-`is_available: false`，余额 −0.01），第 3 条不满足，因此**显式跳过并打印原因**。
+**本次三项均满足，所以 2/2 通过、0 skipped。** 但本项目**保留**了前置条件不满足时的
+显式跳过逻辑，因为此前确实发生过全量运行时 DeepSeek 账户余额耗尽（`is_available: false`）
+的情况：那时这两项**显式跳过并打印原因**，
 
 这不是通过。这是刻意的设计：
 
@@ -51,8 +68,8 @@ npm run test:compliance   # 合规测试集（需要 dev server）
 测试用 `ctx.skip()` 而非静默 `return`，所以 vitest 会正确标记为 skipped。
 **任何把"没跑"报告成"通过"的行为都是本项目的红线。**
 
-余额充足时段（2026-10-13 00:38 与 09:00 前后）这两项测试**确实通过过**，
-证据是当时的运行输出与随后写入 `.scratch/finbuddy-agent/issues/03-agent-contract.md`
+余额充足后这两项测试**已实际通过**（2026-10-13 最终复跑），
+证据是当时写入 `.scratch/finbuddy-agent/issues/03-agent-contract.md`
 的真机验证记录（含实际命题文本与追问文本）。
 
 ---
@@ -64,37 +81,37 @@ npm run test:compliance   # 合规测试集（需要 dev server）
 
 | 层 | 位置 | 数量 | 证明什么 | 不能证明什么 |
 |---|---|---|---|---|
-| 纯逻辑单测 | `lib/*.test.ts` | 28 个文件 | 校验器/公式**本身**正确（真空期判定、公式精度、词表消歧） | 模型是否照做；UI 是否渲染对 |
-| 组件测试 (jsdom) | `components/*.test.tsx` | 7 个文件 / 56 项 | 渲染与**交互**（编造角标不可点击、拖滑块零 fetch） | 真实浏览器布局/样式 |
-| 整页渲染 | `tests/page-render.test.tsx` | 10 项 | **页面装配**（data part 接对组件、抽屉联动、合规分流） | 真实流式时序、CSS |
-| 离线端到端 | `tests/route-offline.test.ts` | 12 项 | **路由编排**（mock 模型，零余额依赖） | 模型真实输出质量 |
+| 纯逻辑单测 | `lib/*.test.ts` | 25 个文件 / 383 项 | 校验器/公式**本身**正确（真空期判定、公式精度、词表消歧） | 模型是否照做；UI 是否渲染对 |
+| 组件测试 (jsdom) | `components/*.test.tsx` | 9 个文件 / 74 项 | 渲染与**交互**（编造角标不可点击、拖滑块零 fetch） | 真实浏览器布局/样式 |
+| 整页渲染 | `tests/page-render.test.tsx` | 13 项 | **页面装配**（data part 接对组件、抽屉联动、合规分流） | 真实流式时序、CSS |
+| 离线端到端 | `tests/route-offline.test.ts` | 25 项 | **路由编排**（mock 模型，零余额依赖） | 模型真实输出质量 |
 | 真机端到端 | `tests/agent-contract.integration.test.ts`、`tests/gateway.integration.test.ts` | 4 项 | 契约在**真实模型 + 真实数据源**下是否成立 | 可复现性（受余额/网络影响） |
-| 真实输出回归 | `tests/fixtures/*` + `tests/real-*.test.ts` | 17 项 | 冻结真实输出，**防止解析逻辑退化** | 新场景（fixture 是历史快照） |
+| 真实输出回归 | `tests/fixtures/*` + `tests/real-*.test.ts`、`tests/fallback-chain.test.ts`、`tests/vacuum-chain.test.ts` | 30 项 | 冻结真实输出，**防止解析逻辑退化** | 新场景（fixture 是历史快照） |
+| 交付守卫 | `tests/deliverable-docs.test.ts`、`tests/demo-script-check.test.tsx` | 13 项 | 文档声称的东西真的存在（脚本可跑、未部署就不预填已完成） | 文档措辞是否夸大（人判断） |
 
-### 测试文件清单（实际用例数，2026-10-13）
+总计：**46 个文件 / 557 项**。
+
+### 测试文件清单（实际用例数，取自 2026-10-13 最终一次 `vitest run`）
 
 ```
-lib/evidence.test.ts                 22     lib/vocabulary.test.ts               22
-lib/analysis-prompt.test.ts          21     lib/sensitivity.test.ts              20
-lib/context-summary.test.ts          18     lib/message-view.test.ts             18
-lib/output-contract.test.ts          18     lib/markdown.test.ts                 16
-lib/compliance.test.ts               16     lib/analysis.test.ts                 15
-lib/followups.test.ts                12     lib/orchestration.test.ts            11
-lib/ticker.test.ts                   10     lib/citations.test.ts                 9
-lib/preset-cases.test.ts              9     lib/intent.test.ts                    7
-lib/gateway.test.ts                   6     lib/financials.test.ts                5
-lib/format.test.ts                    4
+lib/  (25 文件 / 383 项)
+  evidence 29   analysis-prompt 27   vocabulary 25   session-store 24
+  message-view 23   context-summary 21   sensitivity 20   compliance 19
+  orchestration 19   output-contract 18   markdown 16   payload-fields 16
+  analysis 15   financials 13   followups 12   intent 11   session-switch 11
+  format 10   ticker 10   citations 9   preset-cases 9   refs 8   rerun 8
+  gateway 6   fallback 4
 
-components/EvidenceDrawer.test.tsx   11     components/IntentTags.test.tsx       11
-components/CitationText.test.tsx      7     components/ComplianceNotice.test.tsx  7
-components/EvidenceColumns.test.tsx   7     components/SensitivityCard.test.tsx   7
-components/ThinkingTimeline.test.tsx  6
+components/  (9 文件 / 74 项)
+  EvidenceDrawer 11   IntentTags 11   SessionSidebar 11   SensitivityCard 9
+  CitationText 8   ComplianceNotice 7   EvidenceColumns 7   ThinkingTimeline 6
+  tailwind-classes 4
 
-tests/real-t4-regression.test.ts     13     tests/route-offline.test.ts          12
-tests/page-render.test.tsx           10
-tests/fallback-chain.test.ts          5     tests/demo-script-check.test.tsx      4
-tests/real-output-regression.test.ts  4     tests/vacuum-chain.test.ts            3
-tests/agent-contract.integration.ts   2 (真机)  tests/gateway.integration.test.ts  2 (真机)
+tests/  (12 文件 / 100 项)
+  route-offline 25 (离线端到端)   page-render 13   real-t4-regression 13
+  fallback-chain 10   deliverable-docs 9   ime-submit 8   submit-guard 7
+  demo-script-check 4   real-output-regression 4   vacuum-chain 3
+  agent-contract.integration 2 (真机)   gateway.integration 2 (真机)
 ```
 
 ---
@@ -213,8 +230,9 @@ npx tsx scripts/t5-verify.mts                 # 两个预置案例的测算参�
 
 诚实列出，避免读者高估覆盖：
 
-- [ ] **真机集成测试最近一次为 skipped**（DeepSeek 余额耗尽）。需充值后重跑：
-      `npx vitest run` 与 `node scripts/compliance-suite.mjs`。
+- [x] ~~**真机集成测试最近一次为 skipped**（DeepSeek 余额耗尽）~~ → **已重跑并通过**
+      （2026-10-13）：`npx vitest run` → **46 files / 557 passed / 0 skipped**；
+      `node scripts/compliance-suite.mjs` → **6/6, exit 0**。
 - [ ] **响应式布局仅验证 1280px+ 桌面端**（移动端为 spec 明确的 Out of Scope）。
 - [ ] **浏览器真实渲染未做视觉回归测试**（无 Playwright/截图对比）。
       组件测试覆盖的是行为与可交互性，不是像素。

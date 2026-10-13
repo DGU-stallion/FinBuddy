@@ -12,7 +12,7 @@
 |---|---|---|
 | 代码可构建 | ✅ | `npm run build` → Compiled successfully |
 | GitHub 仓库（公开） | ✅ | https://github.com/DGU-stallion/FinBuddy |
-| 全新克隆可自包含运行 | ✅ | 无 `.env` 时 470 passed / 6 skipped / **0 failed** |
+| 全新克隆可自包含运行 | ✅ | 无 `.env` 时 `0 failed`；真机测试显式 `ctx.skip()` 并打印原因（不当成通过） |
 | 密钥未入库 | ✅ | 全历史扫描：3 个真实密钥 0 次出现；仅 `.env.example`（空模板）被跟踪 |
 | `vercel.json` / `.env.example` | ✅ | 已就绪（选国内平台时 `vercel.json` 可删） |
 | 部署后验证脚本 | ✅ | `scripts/verify-deploy.mjs`（已实测有牙：见第 3 节） |
@@ -174,7 +174,7 @@ PORT=3000 npm run start
 - [x] 密钥全历史扫描通过
 - [x] `.env.example` / `vercel.json` / 验证脚本就绪
 - [x] 验证脚本的判据经对照实验确认有效（含故意缓冲的反例）
-- [x] **真机端到端已跑通**：476 passed / **0 skipped**；合规测试集 6/6 exit 0
+- [x] **真机端到端已跑通**：557 passed / **0 skipped**；合规测试集 6/6 exit 0
 - [ ] **未实际部署**（需账户授权，属人工步骤）
 - [ ] 未产生公开 URL
 - [ ] 未做部署后验证

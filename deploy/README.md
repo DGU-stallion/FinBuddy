@@ -88,8 +88,12 @@ $EDITOR deploy/.env.deploy          # 填 FINBUDDY_SSH_HOST=finbuddy
 
 ### 为什么上传包要排除 `tmp/`
 
-仓库里 `tmp/iso-probe/` 是一次 Next 构建产物被**误提交**（commit `e1c4713`），
-占 **162MB / 178 个文件**；`.gitignore` 只覆盖了 `tmp/shots/`。
+仓库里 `tmp/iso-probe/` 曾是一次 Next 构建产物被**误提交**（commit `e1c4713`），
+占 **162MB / 178 个文件**；`.gitignore` 当时只覆盖了 `tmp/shots/`。
+
+> ✅ **已修复（2026-10-13）**：已 `git rm -r --cached tmp/iso-probe tmp/iso-test` 并删除磁盘副本，
+> `.gitignore` 已补 `tmp/iso-*/` 防复发。以下 `deploy.sh` 的排除规则**保留**作为纵深防御
+> （万一将来又误提交同类产物）。
 
 | | 包大小 | 文件数 |
 |---|---|---|
@@ -97,9 +101,6 @@ $EDITOR deploy/.env.deploy          # 填 FINBUDDY_SSH_HOST=finbuddy
 | 排除后 | **476 KB** | **151** |
 
 `deploy.sh` 用 `git archive <sha> -- . ':(exclude)tmp'` 排除。
-
-> ⚠️ **这是一个真实的仓库卫生问题，尚未修复**：163MB 的构建产物躺在 git 历史里，
-> 每次 clone 都要拉。建议单独处理：`git rm -r --cached tmp/iso-probe` 并补 `.gitignore`。
 
 ---
 

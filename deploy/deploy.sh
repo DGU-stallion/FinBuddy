@@ -155,13 +155,13 @@ trap 'rm -f "$TARBALL"' EXIT
 
 # git archive 只导出该 commit 已跟踪的文件 —— 未提交改动与 .env 天然排除。
 #
-# `:(exclude)tmp` 是必需的，不是优化：仓库里 `tmp/iso-probe/` 是一次 Next 构建
-# 产物被误提交（commit e1c4713，.gitignore 只覆盖了 tmp/shots/），占 162MB /
-# 178 个文件。带上它上传包是 26MB / 384 文件，排除后是 476KB / 151 文件。
-# 构建完全不需要它，白传 25MB 只会拖慢部署。
+# `:(exclude)tmp` 是纵深防御，不是优化：仓库里 `tmp/iso-probe/` 曾是一次 Next 构建
+# 产物被误提交（commit e1c4713），占 162MB / 178 个文件。该误提交已于 2026-10-13 修复
+# （`git rm -r --cached` + `.gitignore` 补 `tmp/iso-*/`），但 keep 这条排除规则可以保证：
+# 即使将来又误提交同类产物，部署包也不会被拖大。排除后是 476KB / 151 文件。
 git archive --format=tar.gz -o "$TARBALL" "$DEPLOY_SHA" -- . ':(exclude)tmp'
 SRC_SIZE="$(du -h "$TARBALL" | cut -f1)"
-ok "源码包已生成：${SRC_SIZE}（已排除误入库的 tmp/ 构建产物）"
+ok "源码包已生成：${SRC_SIZE}（已排除 tmp/ 构建产物）"
 
 # 确认包里没有密钥（防御性检查：万一 .env 哪天被误提交）
 if tar -tzf "$TARBALL" | grep -qxE '\.env|\.env\.local|\.env\.production\.local'; then

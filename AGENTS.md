@@ -14,12 +14,27 @@ Single-context layout (`GLOSSARY.md` and `docs/adr/` at repo root). See `docs/ag
 
 ### Current work
 
-The active effort is `.scratch/finbuddy-agent/`. **Read
-`.scratch/finbuddy-agent/handoff-t4.md` before starting work** — it carries the context that
-does not live in the code (environment traps, the T3→T4 data-part contract, and the pitfalls
-this project has already paid for). Advance one ticket at a time from
-`.scratch/finbuddy-agent/issues/`; the frontier is the lowest-numbered ticket that is
-unblocked and unchecked.
+The build is **complete and delivered**. All five tickets in `.scratch/finbuddy-agent/issues/`
+(T1..T5) are done; there is no frontier to advance.
+
+Delivered state (verified 2026-10-13, see `README.md` 「测试与验证」 and `TESTING.md`):
+
+- `npx vitest run` → **46 files / 557 passed / 0 skipped**
+- `npx tsc --noEmit` clean · `npm run lint` clean · `npm run build` compiled
+- `node scripts/compliance-suite.mjs` → **6/6, exit 0** (dev server on :3000)
+
+Orientation for a new session:
+
+- **`README.md`** — the delivered product doc (users, workflow, design, AI role, data, boundaries).
+- **`AI-USAGE.md`** — what AI did, where it went wrong, how it was caught. The richest record here.
+- **`.scratch/finbuddy-agent/spec.md`** — the product spec and interaction decisions.
+- **`.scratch/finbuddy-agent/issues/`** — per-ticket records (each carries its own findings).
+- **`docs/adr/0001`、`0002`** — the hard decisions (guardrails, compliance, evidence integrity).
+- **`.scratch/finbuddy-agent/handoff-t4.md`** — environment traps and paid-for pitfalls, worth
+  reading before touching the data-part contract or re-running anything against live services.
+
+There is no open work ticket. If you pick this up, the honest list of gaps is in
+`README.md` 「失败条件与后续验证计划」 and `AI-USAGE.md` §6「未验证/待补」.
 
 Two rules specific to this repo:
 
