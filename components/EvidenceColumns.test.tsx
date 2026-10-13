@@ -83,6 +83,6 @@ describe('EvidenceColumns', () => {
     const { container } = render(
       <EvidenceColumns text={BODY} refs={refs} onOpenRef={() => {}} messageId="m1" compressed />,
     );
-    expect(container.querySelector('.grid')?.className).toContain('text-[11px]');
+    expect(container.querySelector('.grid')?.className).toContain('text-aux');
   });
 });

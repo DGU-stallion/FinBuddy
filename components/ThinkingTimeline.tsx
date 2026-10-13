@@ -28,29 +28,29 @@ export function ThinkingTimeline({
   if (steps.length === 0) return null;
 
   return (
-    <div className="rounded-lg border border-slate-800 bg-slate-900/30">
+    <div className="rounded-card border border-line bg-page-alt">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
         className="flex w-full items-center justify-between px-3 py-2 text-left"
         aria-expanded={open}
       >
-        <span className="flex items-center gap-2 text-xs text-slate-400">
+        <span className="flex items-center gap-2 text-aux text-ink-2">
           <span className={`text-[10px] transition-transform ${open ? 'rotate-90' : ''}`}>▶</span>
           思考过程
-          <span className="text-slate-600">·</span>
-          <span className="text-slate-500">{steps.length} 步</span>
+          <span>·</span>
+          <span>{steps.length} 步</span>
           {activeIndex != null && activeIndex >= 0 && (
-            <span className="text-sky-400">正在执行：{steps[activeIndex]?.label ?? ''}</span>
+            <span className="text-brand">正在执行：{steps[activeIndex]?.label ?? ''}</span>
           )}
         </span>
-        <span className="font-mono text-[10px] text-slate-600">
+        <span className="font-mono text-aux text-ink-2">
           {elapsedMs != null ? `${(elapsedMs / 1000).toFixed(1)}s` : ''}
         </span>
       </button>
 
       {open && (
-        <ol className="space-y-0 border-t border-slate-800 px-3 py-2">
+        <ol className="space-y-0 border-t border-line px-3 py-2">
           {steps.map((s, i) => {
             const done = activeIndex == null || i < activeIndex;
             const active = activeIndex != null && i === activeIndex;
@@ -59,16 +59,16 @@ export function ThinkingTimeline({
                 <span className="mt-1 flex flex-col items-center">
                   <span
                     className={`h-1.5 w-1.5 rounded-full ${
-                      active ? 'bg-sky-400 ring-2 ring-sky-900' : done ? 'bg-emerald-600' : 'bg-slate-700'
+                      active ? 'bg-brand ring-2 ring-brand/25' : done ? 'bg-fall' : 'bg-line-strong'
                     }`}
                   />
-                  {i < steps.length - 1 && <span className="mt-0.5 w-px flex-1 bg-slate-800" />}
+                  {i < steps.length - 1 && <span className="mt-0.5 w-px flex-1 bg-line" />}
                 </span>
                 <span className="min-w-0 flex-1">
-                  <span className={`text-xs ${active ? 'text-sky-300' : 'text-slate-300'}`}>
+                  <span className={`text-body ${active ? 'text-brand' : 'text-ink-1'}`}>
                     {s.label}
                   </span>
-                  <span className="mt-0.5 block text-[11px] leading-relaxed text-slate-500">
+                  <span className="mt-0.5 block text-aux leading-relaxed text-ink-2">
                     {s.detail}
                   </span>
                 </span>

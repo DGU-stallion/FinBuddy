@@ -14,13 +14,16 @@ import { CitationText } from './CitationText';
  * - **正文含 Markdown**（真机输出确实写了 `**加粗**` 与 `- 列表`），
  *   按纯文本渲染会让用户看到字面星号 → 经 lib/markdown.ts 做极小子集解析。
  *   列表须逐行处理，否则 `- ` 也会原样外露。
- * - 高密度金融排版：等宽数字、紧凑行距、语义色（支持=绿、反对=红、无法验证=琥珀）。
+ * - 高密度金融排版：等宽数字、紧凑行距。
+ * - 栏位语义色（红线 R3）：支持=蓝 / 反对=琥珀 / 无法验证=灰，
+ *   刻意**避开红绿** —— A股用户心智里"红=涨=好"，若反对证据用红色，
+ *   第一直觉信号是反的（设计契约 §3.2）。涨跌色（rise/fall）只用于行情数字。
  */
 
 const COLUMN_STYLE: Record<string, { head: string; border: string; dot: string }> = {
-  支持证据: { head: 'text-emerald-400', border: 'border-emerald-900/60', dot: 'bg-emerald-500' },
-  反对证据: { head: 'text-red-400', border: 'border-red-900/60', dot: 'bg-red-500' },
-  无法验证项: { head: 'text-amber-400', border: 'border-amber-900/60', dot: 'bg-amber-500' },
+  支持证据: { head: 'text-evidence-support', border: 'border-evidence-support/30', dot: 'bg-evidence-support' },
+  反对证据: { head: 'text-evidence-against', border: 'border-evidence-against/30', dot: 'bg-evidence-against' },
+  无法验证项: { head: 'text-evidence-unknown', border: 'border-evidence-unknown/30', dot: 'bg-evidence-unknown' },
 };
 
 /** 渲染一段内联 token（加粗 + 角标共存）。 */
@@ -41,7 +44,7 @@ function Inline({
     <>
       {tokens.map((t, i) =>
         t.type === 'bold' ? (
-          <strong key={i} className="font-semibold text-slate-200">
+          <strong key={i} className="font-semibold text-ink-1">
             {/* 加粗内部仍可能有角标，所以文本也要过角标校验 */}
             <CitationText
               text={t.value}
@@ -89,17 +92,18 @@ export function EvidenceColumns({
   const columns = splitEvidence(text);
   const allowed = refs.map((r) => r.refId);
 
+  // 抽屉打开时栏内字号压到 text-aux（12px）：380px 抽屉抢占视口，三栏同屏
+  // 对照时密度优先；12px 是 R1 允许的最小辅助字号（不得再低）。
+  const colFont = compressed ? 'text-aux' : 'text-body';
   return (
     <div
-      className={`grid gap-3 transition-all duration-300 ${
-        compressed ? 'grid-cols-3 text-[11px]' : 'grid-cols-3'
-      }`}
+      className={`grid grid-cols-3 gap-3 transition-all duration-300 ${colFont}`}
     >
       {columns.map((col) => {
         const style = COLUMN_STYLE[col.name] ?? {
-          head: 'text-slate-400',
-          border: 'border-slate-800',
-          dot: 'bg-slate-500',
+          head: 'text-ink-2',
+          border: 'border-line',
+          dot: 'bg-ink-3',
         };
         const missing = col.content === null;
         const empty = col.content === '';
@@ -108,26 +112,26 @@ export function EvidenceColumns({
         return (
           <section
             key={col.name}
-            className={`min-w-0 rounded-lg border bg-slate-900/30 p-3 ${style.border}`}
+            className={`min-w-0 rounded-card border bg-page-alt p-3 ${style.border}`}
           >
             <header className="mb-2 flex items-center gap-1.5">
               <span className={`h-1.5 w-1.5 rounded-full ${style.dot}`} />
-              <h4 className={`text-xs font-medium ${style.head}`}>{col.name}</h4>
+              <h4 className={`text-aux font-medium ${style.head}`}>{col.name}</h4>
             </header>
 
             {missing || empty ? (
-              <p className="text-[11px] text-slate-600">
+              <p className="text-aux text-ink-2">
                 {missing ? '本栏缺失（模型未按契约输出该分栏）' : '本栏为空'}
               </p>
             ) : (
-              <ul className={`space-y-1.5 leading-relaxed text-slate-300 ${compressed ? 'text-[11px]' : 'text-xs'}`}>
+              <ul className="space-y-1.5 leading-relaxed text-ink-1">
                 {lines.map((line, i) => (
                   <li
                     key={i}
                     className={line.type === 'li' ? 'relative pl-3' : ''}
                   >
                     {line.type === 'li' && (
-                      <span className="absolute left-0 text-slate-600">•</span>
+                      <span className="absolute left-0 text-ink-3">•</span>
                     )}
                     <Inline
                       tokens={line.token}

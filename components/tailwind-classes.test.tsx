@@ -99,8 +99,10 @@ describe('抽屉真的有背景色（回归：/98 被丢弃导致抽屉透明）
     const aside = container.querySelector('aside');
     expect(aside).not.toBeNull();
     const cls = aside?.className ?? '';
-    // 必须有背景色类 —— 否则抽屉会透明（用户看到"UI 坏了"）
-    expect(cls).toMatch(/bg-slate-950\//);
+    // 必须有背景色类 —— 否则抽屉会透明（用户看到"UI 坏了"）。
+    // 断言目标从深色 token（bg-slate-950/）改为浅色主题 token（bg-chat-ai/）：
+    // 守卫的语义是「抽屉背景色类不会被 Tailwind 静默丢弃」，与用哪个色无关。
+    expect(cls).toMatch(/bg-chat-ai\//);
     expect(cls).not.toContain('/98');
   });
 });

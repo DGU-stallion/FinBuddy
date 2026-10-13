@@ -129,7 +129,10 @@ describe('EvidenceDrawer', () => {
     const t = document.body.textContent ?? '';
     expect(t).toContain('-6.41%');
     const dd = [...document.querySelectorAll('dd')].find((el) => el.textContent?.includes('-6.41%'));
-    expect(dd?.className).toContain('emerald');
+    // 断言目标从 tailwind 调色板名（emerald）改为设计 token（fall）：
+    // UI 重做后涨跌色走 tailwind.config.ts 的 rise/fall 语义 token，
+    // 断言语义不变 —— 负涨幅仍必须渲染为「跌」色（绿）。
+    expect(dd?.className).toContain('fall');
   });
 
   it('末尾字段值不含 undefined/NaN（缺失写"缺失"）', () => {

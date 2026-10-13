@@ -16,20 +16,20 @@ export type ComplianceLayer = ComplianceLayerName;
 
 const STYLE: Record<ComplianceLayer, { border: string; bg: string; icon: string; title: string }> = {
   keyword: {
-    border: 'border-amber-800',
-    bg: 'bg-amber-950/30',
+    border: 'border-warn-border',
+    bg: 'bg-warn-bg',
     icon: '🛡️',
     title: '已转为基本面核验',
   },
   intent: {
-    border: 'border-amber-800',
-    bg: 'bg-amber-950/30',
+    border: 'border-warn-border',
+    bg: 'bg-warn-bg',
     icon: '🛡️',
     title: '已转为基本面核验',
   },
   fail_closed: {
-    border: 'border-slate-700',
-    bg: 'bg-slate-900/50',
+    border: 'border-line-strong',
+    bg: 'bg-page-alt',
     icon: '⚠️',
     title: '合规校验服务暂时不可用',
   },
@@ -47,16 +47,16 @@ export function ComplianceNotice({
   const isFailClosed = layer === 'fail_closed';
 
   return (
-    <div className={`rounded-lg border px-4 py-3 ${s.border} ${s.bg}`}>
-      <div className="flex items-center gap-2 text-sm font-medium text-slate-200">
+    <div className={`rounded-card border px-4 py-3 ${s.border} ${s.bg}`}>
+      <div className="flex items-center gap-2 text-body font-medium text-ink-1">
         <span>{s.icon}</span>
         {s.title}
       </div>
-      <div className="mt-1.5 whitespace-pre-wrap text-xs leading-relaxed text-slate-400">
+      <div className="mt-1.5 whitespace-pre-wrap text-body leading-relaxed text-ink-2">
         {text}
       </div>
       {isFailClosed && (
-        <div className="mt-2 text-[11px] text-slate-500">
+        <div className="mt-2 text-aux text-ink-2">
           提示：这不是因为您的问题违规，而是合规校验环节未能完成。请稍后重试。
         </div>
       )}

@@ -12,6 +12,9 @@ import { useState } from 'react';
  *
  * 因此本组件不自己发请求，只把"意图"抛给父组件（onRerun），由父组件决定
  * 往流里塞什么。这样"何时重跑"的规则可以单测。
+ *
+ * 浅色主题：标签按类别着色（标的=品牌蓝 / 事件=琥珀 / 核验维度=绿），
+ * 均用浅底+深色文字的组合保证白底对比度。
  */
 
 export interface TagEditIntent {
@@ -31,9 +34,9 @@ export function tagKind(tag: string): { kind: string; value: string } {
 }
 
 const KIND_STYLE: Record<string, string> = {
-  标的: 'border-sky-700/60 bg-sky-900/30 text-sky-200',
-  事件: 'border-amber-800/60 bg-amber-950/30 text-amber-200',
-  核验维度: 'border-emerald-800/60 bg-emerald-950/30 text-emerald-200',
+  标的: 'border-brand/30 bg-brand-bg text-brand',
+  事件: 'border-warn-border bg-warn-bg text-warn',
+  核验维度: 'border-fall/30 bg-fall/10 text-fall',
 };
 
 export function IntentTags({
@@ -82,14 +85,14 @@ export function IntentTags({
 
   return (
     <div className="flex flex-wrap items-center gap-1.5">
-      <span className="text-[11px] text-slate-500">意图标签</span>
+      <span className="text-aux text-ink-2">意图标签</span>
       {tags.map((tag, i) => {
         const { kind, value } = tagKind(tag);
-        const style = KIND_STYLE[kind] ?? 'border-slate-700 bg-slate-800/40 text-slate-300';
+        const style = KIND_STYLE[kind] ?? 'border-line-strong bg-page-alt text-ink-2';
 
         if (editingIndex === i) {
           return (
-            <span key={i} className={`flex items-center gap-1 rounded border px-1.5 py-0.5 text-[11px] ${style}`}>
+            <span key={i} className={`flex items-center gap-1 rounded-chip border px-1.5 py-0.5 text-aux ${style}`}>
               <span className="opacity-70">{kind}:</span>
               <input
                 autoFocus
@@ -100,21 +103,21 @@ export function IntentTags({
                   if (e.key === 'Escape') cancelEdit();
                 }}
                 aria-label={`编辑标签 ${kind}`}
-                className="w-40 bg-transparent outline-none"
+                className="w-40 bg-transparent text-ink-1 outline-none"
               />
               {/* 点确认才重跑 */}
               <button
                 type="button"
                 onClick={() => confirmEdit(i)}
                 disabled={disabled}
-                className="rounded bg-sky-700/60 px-1 text-[10px] text-sky-100 hover:bg-sky-600/60 disabled:opacity-40"
+                className="rounded-chip bg-brand px-1.5 py-0.5 text-aux text-white hover:bg-brand-hover disabled:opacity-40"
               >
                 确认并重跑
               </button>
               <button
                 type="button"
                 onClick={cancelEdit}
-                className="px-1 text-[10px] text-slate-400 hover:text-slate-200"
+                className="px-1 text-aux text-ink-2 hover:text-ink-1"
               >
                 取消
               </button>
@@ -123,7 +126,7 @@ export function IntentTags({
         }
 
         return (
-          <span key={i} className={`flex items-center gap-1 rounded border px-1.5 py-0.5 text-[11px] ${style}`}>
+          <span key={i} className={`flex items-center gap-1 rounded-chip border px-1.5 py-0.5 text-aux ${style}`}>
             <span className="opacity-70">{kind}:</span>
             <button
               type="button"
@@ -138,7 +141,7 @@ export function IntentTags({
               type="button"
               onClick={() => remove(i)}
               disabled={disabled}
-              className="ml-0.5 text-slate-500 hover:text-red-400 disabled:opacity-40"
+              className="ml-0.5 text-ink-2 hover:text-rise disabled:opacity-40"
               aria-label={`删除标签 ${tag}`}
               title="删除标签（立即重新分析）"
             >
