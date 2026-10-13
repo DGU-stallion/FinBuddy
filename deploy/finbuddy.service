@@ -1,0 +1,44 @@
+# FinBuddy systemd 单元
+#
+# 安装位置：/etc/systemd/system/finbuddy.service
+#
+# 为什么不用 pm2：systemd 是系统自带、无需额外依赖，且 `systemctl restart` 的
+# 语义（等待进程真正退出再拉起）对「重新部署后必须加载新构建产物」更可靠。
+
+[Unit]
+Description=FinBuddy (Next.js) — 可证伪的个股分析助手
+Documentation=file:///opt/finbuddy/app/deploy/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/finbuddy/app
+
+# 4 个密钥（DEEPSEEK_API_KEY / DEEPSEEK_BASE_URL / FUYAO_API_KEY / IFIND_MCP_KEY）
+# 由 deploy.sh 用 scp 单独投递（.env 在 .gitignore 中，不进代码归档）。
+EnvironmentFile=/opt/finbuddy/app/.env
+
+Environment=NODE_ENV=production
+# 3001 是刻意的选择，勿改成 3000 —— 原因见 deploy/README.md「为什么是 3001」
+Environment=PORT=3001
+
+# 1GB 内存的机器上给 Node 留出上限，避免极端情况下触发系统 OOM 杀进程
+Environment=NODE_OPTIONS=--max-old-space-size=768
+
+# 启动命令由 remote-setup.sh 在安装时替换为 npm 的实际路径
+# （直接写死 /usr/bin/npm 在非 NodeSource 安装的机器上会报 203/EXEC）
+ExecStart=/usr/bin/npm run start
+Restart=always
+RestartSec=3
+
+# 宽限期要覆盖一次完整问答（含工具循环），否则重启时会切断进行中的流
+TimeoutStopSec=30
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=finbuddy
+
+[Install]
+WantedBy=multi-user.target

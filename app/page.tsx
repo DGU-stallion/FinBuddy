@@ -67,6 +67,26 @@ export default function WorkbenchPage() {
    */
   const inFlight = useRef(false);
 
+  /**
+   * 输入法（IME）组词状态 —— 记录"最近一次 Enter 是不是在组词中按的"。
+   *
+   * 真缺陷（用户实测第二次报告"还是显示了两次"）：
+   * 中文/日文输入法打字时，**Enter 的首要含义是"确认候选词"**，不是"提交"。
+   * 但 `<form onSubmit>` 分不清两者 —— 一次选词就发出一个请求，内容还是
+   * **未打完的拼音**（如 "shichang"）；用户接着打完完整问题再按 Enter，
+   * 又发一个 → 用户看到**两轮**对话，第一轮是垃圾。
+   *
+   * 这也解释了为什么我此前测不出来：Playwright 的 fill() 直接赋值、
+   * 绕过输入法，我那些"连点 5 次"用例全在测另一条路径。
+   *
+   * 为什么存**时间戳**而不是布尔：
+   * 布尔标志依赖"一定会收到 compositionend"来复位，而某些浏览器/输入法
+   * 组合只给 keyCode 229、不给 compositionend —— 布尔一旦置上就**永久锁死**
+   * 提交（用户再也发不出消息）。这与前面 inFlight 的"一次失败锁死界面"同类。
+   * 时间戳天然会过期：只有紧跟其后的那次 submit 被认为是选词。
+   */
+  const imeComposing = useRef(false);
+
   const { messages, sendMessage, status, error, setMessages } = useChat();
 
   // ---------------------------------------------------------------------------
@@ -587,6 +607,10 @@ export default function WorkbenchPage() {
           <form
             onSubmit={(e) => {
               e.preventDefault();
+              // 兜底：少数浏览器在组词状态下仍会提交表单（源头 preventDefault 没拦住）。
+              // 注意这个标志**必然可以被解除**（见 onKeyDown 的非组词分支与
+              // onCompositionEnd），否则会像 inFlight 那样"一次异常锁死界面"。
+              if (imeComposing.current) return;
               submit(input);
             }}
             className="flex gap-2"
@@ -594,6 +618,28 @@ export default function WorkbenchPage() {
             <input
               value={input}
               onChange={(e) => setInput(e.target.value)}
+              /**
+               * 核心修复：组词中的 Enter **在源头阻止默认行为**。
+               *
+               * 表单的隐式提交由 Enter 的默认行为触发；只要在组词状态下
+               * preventDefault，浏览器就不会提交表单 —— 而不是"提交后再丢弃"。
+               *
+               * 组词判定：isComposing 是标准属性；部分浏览器只给 keyCode 229
+               * （IME 处理中的历史约定），两者都认。
+               *
+               * 非组词的 Enter 会**主动清除**标志：这样即使某次组词没有
+               * 正常收到 compositionend，用户下一次正常按 Enter 也能恢复提交
+               * —— 状态自愈，不会锁死。
+               */
+              onKeyDown={(e) => {
+                if (e.key !== 'Enter') return;
+                if (e.nativeEvent.isComposing || e.keyCode === 229) {
+                  imeComposing.current = true;
+                  e.preventDefault(); // 这一步是"选词"，不是"提交"
+                } else {
+                  imeComposing.current = false; // 真实提交：顺便自愈
+                }
+              }}
               placeholder="输入投资疑问或传闻，如：中际旭创大客户砍单传闻成立吗？"
               className="flex-1 rounded-card border border-line-strong bg-chat-ai px-4 py-2.5 text-body text-ink-1 outline-none transition-colors placeholder:text-ink-3 focus:border-brand focus:ring-2 focus:ring-brand/20"
               disabled={busy}

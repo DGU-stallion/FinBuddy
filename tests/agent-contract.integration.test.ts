@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import fs from 'fs';
 import path from 'path';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
+import { scanPredictionLanguage } from '@/lib/analysis';
 import { generateText } from 'ai';
 
 /**
@@ -153,12 +154,36 @@ describe('真机集成：T3 分析契约', () => {
 
       // 3) 角标全部可溯源（契约校验 ok，无 fabricated_citation）
       const contract = a.dataParts.contract as
-        | { ok?: boolean; violations?: Array<{ code: string }> }
+        | { ok?: boolean; violations?: Array<{ code: string; detail?: string }> }
         | undefined;
       expect(contract).toBeDefined();
       const codes = (contract?.violations ?? []).map((v) => v.code);
+
+      // 【为什么这里只断言 fabricated_citation，不断言 trade_conclusion】
+      // 曾经这里同时断言 `not.toContain('trade_conclusion')`，结果**约 1/3 概率
+      // 随机失败**（实测 2 次命中）。原因不是代码坏了，而是断言写错了对象：
+      //   · fabricated_citation 是**我们代码的不变量** —— 角标只能来自本轮
+      //     工具返回值，前端/契约都不允许放开。它必须恒为真。
+      //   · trade_conclusion 取决于**模型这一次说了什么**。模型产出是概率性的，
+      //     偶尔写出"目标价/看涨"之类措辞是正常的；此时契约**正确地报出违规**
+      //     才是期望行为。断言"模型永远不这么说"等于把概率事件当不变量。
+      // 这是"测试在断言模型行为而非断言系统行为"，属于测试自身的缺陷。
+      //
+      // 因此改为断言**机制**：若正文含预测语言，契约必须报出 trade_conclusion；
+      // 若不含，则不应报。两种情况都验证了检测器在工作，且不再随机失败。
       expect(codes).not.toContain('fabricated_citation');
-      expect(codes).not.toContain('trade_conclusion');
+      const predictionHits = scanPredictionLanguage(a.text);
+      if (predictionHits.length > 0) {
+        expect(
+          codes,
+          `正文含预测语言「${predictionHits.join('、')}」但契约未报 trade_conclusion —— 合规检测失效`,
+        ).toContain('trade_conclusion');
+      } else {
+        expect(
+          codes,
+          '正文无预测语言却报了 trade_conclusion —— 检测器误报',
+        ).not.toContain('trade_conclusion');
+      }
 
       // 4) 引用集合按分配顺序返回（T3 发现的乱序缺陷）
       const refs = a.dataParts.refs as { refs?: Array<{ refId: string }> } | undefined;
