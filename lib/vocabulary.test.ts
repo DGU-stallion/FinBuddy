@@ -13,7 +13,7 @@ import { scanPredictionLanguage } from './analysis';
 import { isVerificationOriented } from './followups';
 
 /**
- * Seam 8: 跨 seam 共享的合规词表（单一事实来源）
+ * Seam 14: 跨 seam 共享的合规词表（单一事实来源）
  *
  * 背景（T3 code-review Standards 轴发现）：买入/卖出类词表曾在 3 处各自维护
  * （lib/compliance.ts 输入侧、lib/analysis.ts 输出侧、lib/followups.ts 追问侧），

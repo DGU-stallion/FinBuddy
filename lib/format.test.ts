@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { formatSnapshotForLLM, formatFinancialsForLLM } from './format';
 
 /**
- * Seam 3: payload -> LLM 上下文文本
+ * Seam 11: payload -> LLM 上下文文本
  * 公共接口：把网关返回的结构化 JSON 转成带来源/时点/单位标注的 LLM 可读文本。
  * 抓到：字段映射、单位换算、时点标注、缺失字段的显式声明。
  * 漏掉：LLM 如何使用这段文本（模型行为，不可测）。
