@@ -238,10 +238,20 @@ export function parseUiStream(raw: string): {
   dataParts: Record<string, unknown>;
   /** data part 的到达顺序（用于断言写出顺序）。 */
   order: string[];
+  /**
+   * **全部** chunk 的类型序列（用于断言流内事件顺序，如 start 必须最前）。
+   *
+   * 为什么需要它：真缺陷 —— 路由曾把 data-steps/data-plan 写在 start **之前**，
+   * 导致 AI SDK 客户端开出**两条** assistant 消息、页面把同一提问渲染两次。
+   * 只断言 data part 顺序抓不到这个错（data part 的相对顺序是对的），
+   * 必须能看到 start 与 data-* 的**相对位置**。
+   */
+  chunkTypes: string[];
 } {
   const deltas: string[] = [];
   const dataParts: Record<string, unknown> = {};
   const order: string[] = [];
+  const chunkTypes: string[] = [];
 
   for (const line of raw.split('\n')) {
     const trimmed = line.trim();
@@ -253,6 +263,7 @@ export function parseUiStream(raw: string): {
     } catch {
       continue;
     }
+    if (typeof chunk.type === 'string') chunkTypes.push(chunk.type);
     if (chunk.type === 'text-delta' && typeof chunk.delta === 'string') {
       deltas.push(chunk.delta);
     }
@@ -263,5 +274,5 @@ export function parseUiStream(raw: string): {
     }
   }
 
-  return { text: deltas.join(''), dataParts, order };
+  return { text: deltas.join(''), dataParts, order, chunkTypes };
 }

@@ -402,11 +402,24 @@ export async function POST(req: NextRequest) {
 
   // ---------- 组装 UI 消息流（T3 契约） ----------
   //
-  // 单条流里按序写入：编排步骤 → 计划 → 引用集合 → 正文 → 契约校验 → 追问。
+  // 单条流里按序写入：**start** → 编排步骤 → 计划 → 引用集合 → 正文 → 契约校验 → 追问。
   // 全部数据 part 都挂在同一条 assistant 消息上，前端只解析一次消息即可渲染
   // 时间轴、三栏、存证抽屉与追问按钮（T4）。
   const stream = createUIMessageStream({
     execute: async ({ writer }) => {
+      // 0) **必须先写 start**。真缺陷（用户报告"对话出现两次"数次，我此前误判为
+      //    连点与输入法）：
+      //    原先顺序是 data-steps → data-plan → start（start 由下面 merge 的
+      //    sendStart:true 带出）。此时 AI SDK 的客户端消息归集会**先**因为
+      //    data-* 而开一条 assistant 消息，随后 start 又开**第二条** ——
+      //    结果一次提问渲染出两个回答区块（第二条再把 data 追加一次）。
+      //    实测：单次 HTTP 请求 → 客户端 2 条 assistant 消息 → 页面重复。
+      //    最小复现：`data-steps + data-plan + start` ⇒ 2 条消息；
+      //              把 start 提到最前 ⇒ 1 条消息。
+      //    这不是连点、也不是输入法 —— 是**流内事件顺序**错了，与模型无关，
+      //    因此每次请求都必然复现（此前"偶发"的观感来自流式过程中两块的可见时点差异）。
+      writer.write({ type: 'start' });
+
       // 1) 我们自己的编排步骤（确定性中文，不依赖模型原始推理 —— 见 handoff 第 6 条）
       writer.write({
         type: 'data-steps',
@@ -419,8 +432,10 @@ export async function POST(req: NextRequest) {
       // 2) 已确认的分析计划：命题 + 意图标签 + 子问题（供 T4 标签微调、T5 重跑）
       writer.write({ type: 'data-plan', id: PART.plan, data: { ...plan, fromModel } });
 
-      // 3) 把主循环的输出并入同一条流
-      writer.merge(result.toUIMessageStream({ sendStart: true, sendFinish: false }));
+      // 3) 把主循环的输出并入同一条流。
+      //    sendStart 必须为 false：start 已由第 0 步显式写出，再发一次会**再开一条消息**
+      //    （正是本次缺陷的成因）。
+      writer.merge(result.toUIMessageStream({ sendStart: false, sendFinish: false }));
 
       // 4) 流结束后做契约校验（writer.write 在流关闭后不生效，必须先校验再写）
       await result.consumeStream();

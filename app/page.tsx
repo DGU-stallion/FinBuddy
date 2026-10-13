@@ -70,20 +70,20 @@ export default function WorkbenchPage() {
   /**
    * 输入法（IME）组词状态 —— 记录"最近一次 Enter 是不是在组词中按的"。
    *
-   * 真缺陷（用户实测第二次报告"还是显示了两次"）：
+   * ⚠️ 更正（重要）：这**不是**用户所说"对话出现两次"的真因。
+   * 真因是服务端流内事件顺序（data-* 写在 start 之前 → 两条 assistant 消息），
+   * 见 app/api/chat/route.ts 第 0 步注释与 scripts/single-render-check.mjs。
+   * 我两次把"两次"归因到客户端提交路径（连点、输入法），两次都不是真因 ——
+   * 真实原因在**服务端**，且每次请求必然复现（不是偶发）。
+   *
+   * 本段守卫生效的是一条**独立存在的真缺陷**（缺陷表 #22）：
    * 中文/日文输入法打字时，**Enter 的首要含义是"确认候选词"**，不是"提交"。
    * 但 `<form onSubmit>` 分不清两者 —— 一次选词就发出一个请求，内容还是
-   * **未打完的拼音**（如 "shichang"）；用户接着打完完整问题再按 Enter，
-   * 又发一个 → 用户看到**两轮**对话，第一轮是垃圾。
+   * **未打完的拼音**（如 "shichang"）。验证脚本 scripts/ime-submit-check.mjs。
    *
-   * 这也解释了为什么我此前测不出来：Playwright 的 fill() 直接赋值、
-   * 绕过输入法，我那些"连点 5 次"用例全在测另一条路径。
-   *
-   * 为什么存**时间戳**而不是布尔：
-   * 布尔标志依赖"一定会收到 compositionend"来复位，而某些浏览器/输入法
-   * 组合只给 keyCode 229、不给 compositionend —— 布尔一旦置上就**永久锁死**
-   * 提交（用户再也发不出消息）。这与前面 inFlight 的"一次失败锁死界面"同类。
-   * 时间戳天然会过期：只有紧跟其后的那次 submit 被认为是选词。
+   * 为什么存布尔而非时间戳：曾用 300ms 时间窗，实测会误伤"组词后立即提交"。
+   * 布尔标志则由"非组词 Enter 主动清除"实现自愈 ——
+   * 避免像 inFlight 那样"一次异常锁死界面"（详见下方 onKeyDown 注释）。
    */
   const imeComposing = useRef(false);
 
@@ -141,6 +141,7 @@ export default function WorkbenchPage() {
   );
 
   const streamingId = streamingIdFromStatus(status, messages);
+
 
   // ---------------------------------------------------------------------------
   // B2 自动滚动到最新（贴底跟随模型）

@@ -112,6 +112,36 @@ describe('离线端到端：路由编排（mock 模型）', () => {
     await mock.close();
   });
 
+  /**
+   * 真缺陷回归：一次提问不得渲染成两轮（用户报告"对话出现两次"多次）。
+   *
+   * 根因**不是**连点、也不是中文输入法（这两个方向我都修过，都不是真因）：
+   * 路由把 `data-steps`/`data-plan` 写在了 `start` **之前**，而 `start` 由
+   * `merge(..., { sendStart: true })` 带出。AI SDK 的客户端归集于是先因
+   * data-* 开一条 assistant 消息，再因 start 开**第二条** ——
+   * 于是单次 HTTP 请求产生 2 条 assistant 消息，页面把同一提问渲染两次。
+   *
+   * 这里在**协议层**锁死：start 必须是**第一个** chunk，且恰好出现一次。
+   * 为什么不在浏览器里测：那需要真实浏览器，跑不了 CI；而顺序错误在协议层
+   * 就能完全确定性地抓到，浏览器端只是它的后果。
+   */
+  it('流内事件顺序：start 必须是第一个 chunk（否则客户端会开出两条 assistant 消息）', async () => {
+    const POST = await loadRoute(mock.url);
+    const r = await post(POST, [userMsg('中际旭创怎么样')]);
+
+    expect(
+      r.chunkTypes[0],
+      `第一个 chunk 应为 start，实际是 ${r.chunkTypes[0]} —— ` +
+        `data-* 写在 start 之前会让客户端开出两条 assistant 消息（页面重复渲染）`,
+    ).toBe('start');
+
+    const startCount = r.chunkTypes.filter((t) => t === 'start').length;
+    expect(startCount, `start 应恰好出现 1 次，实际 ${startCount} 次`).toBe(1);
+
+    // data part 仍然齐全（修复不能以丢数据为代价）
+    expect(r.order).toEqual(['steps', 'plan', 'refs', 'contract', 'followups']);
+  });
+
   it('单轮：data part 按契约顺序写出，且正文有内容', async () => {
     const POST = await loadRoute(mock.url);
     const r = await post(POST, [userMsg('中际旭创怎么样')]);
