@@ -91,9 +91,14 @@ $EDITOR deploy/.env.deploy          # 填 FINBUDDY_SSH_HOST=finbuddy
 仓库里 `tmp/iso-probe/` 曾是一次 Next 构建产物被**误提交**（commit `e1c4713`），
 占 **162MB / 178 个文件**；`.gitignore` 当时只覆盖了 `tmp/shots/`。
 
-> ✅ **已修复（2026-10-13）**：已 `git rm -r --cached tmp/iso-probe tmp/iso-test` 并删除磁盘副本，
+> ✅ **已清理工作区（2026-10-13）**：已 `git rm -r --cached tmp/iso-probe tmp/iso-test` 并删除磁盘副本，
 > `.gitignore` 已补 `tmp/iso-*/` 防复发。以下 `deploy.sh` 的排除规则**保留**作为纵深防御
 > （万一将来又误提交同类产物）。
+>
+> ⚠️ **诚实说明：git 历史里的旧 blob 仍在**（pack 后 ~11MB，`git count-objects` 可查）。
+> 彻底移除需 `git filter-repo` 重写历史 + 强推 —— 因为仓库已在 GitHub 公开，
+> 重写会影响已有克隆，故**本次未做**，留作后续决定。影响：新 clone 仍会拉一份冗余对象，
+> 但不影响任何功能与构建。
 
 | | 包大小 | 文件数 |
 |---|---|---|
