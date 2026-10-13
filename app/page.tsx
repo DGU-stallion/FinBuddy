@@ -37,6 +37,20 @@ export default function WorkbenchPage() {
   const [elapsedByMessage, setElapsedByMessage] = useState<Record<string, number>>({});
   const startedAt = useRef<{ id: string; at: number } | null>(null);
 
+  /**
+   * **同步**提交闸门 —— 不能用 status 派生的 busy 单独把关。
+   *
+   * 真缺陷（用户实测）：点一次预置案例，服务端出现两次完整一轮
+   * （日志 50459ms + 58260ms 背靠背）。根因是 `busy` 派生自 `useChat` 的
+   * `status`，而 **state 更新是异步的** —— 第二次点击发生在重渲染之前，
+   * 那一刻 `busy` 仍是 false，闸门形同虚设。
+   *
+   * ref 的写入是同步的，所以能在同一个 tick 内挡住后续点击。
+   * `busy` 仍然保留：它负责覆盖"本轮尚未结束但用户没连点"的情况
+   * （例如流式中的禁用态），两者是互补而非替代关系。
+   */
+  const inFlight = useRef(false);
+
   const { messages, sendMessage, status, error, setMessages } = useChat();
 
   const busy = status === 'submitted' || status === 'streaming';
@@ -66,7 +80,17 @@ export default function WorkbenchPage() {
       const cost = Date.now() - started.at;
       setElapsedByMessage((prev) => ({ ...prev, [started.id]: cost }));
     }
+    // 一轮结束（不再有流式消息）→ 释放同步闸门。
+    // 放在这里而不是 sendMessage 之后：必须等**真实轮次结束**才放行，
+    // 否则闸门只在 sendMessage 调用的那一刻有效，流式期间又变成靠 busy 把关。
+    inFlight.current = false;
   }, [streamingId]);
+
+  // 出错时必须释放闸门 —— 否则一次失败会让界面**永久无法再提交**
+  // （用户只能刷新页面，而界面上没有说明）。
+  useEffect(() => {
+    if (error) inFlight.current = false;
+  }, [error]);
 
   // 抽屉打开时禁止背景滚动（380px 抽屉覆盖正文）
   useEffect(() => {
@@ -85,7 +109,9 @@ export default function WorkbenchPage() {
   const submit = useCallback(
     (text: string) => {
       const q = text.trim();
-      if (q === '' || busy) return;
+      // 先查同步闸门（挡同 tick 连点），再查异步 busy（挡已在进行中的轮次）
+      if (q === '' || inFlight.current || busy) return;
+      inFlight.current = true;
       sendMessage({ text: q });
       setInput('');
       setOpenRef(null);
@@ -99,7 +125,8 @@ export default function WorkbenchPage() {
    */
   const rerunFromTags = useCallback(
     (intent: TagEditIntent) => {
-      if (busy) return;
+      if (inFlight.current || busy) return;
+      inFlight.current = true;
       // 重跑提问的构造规则在 lib/rerun.ts（已单测）。页面只管何时调用。
       const text = buildRerunText({
         reason: intent.reason,
@@ -115,6 +142,7 @@ export default function WorkbenchPage() {
 
   /** 清空上下文（票面要求：避免上一只股票记忆污染）。 */
   const clearContext = useCallback(() => {
+    inFlight.current = false;
     setMessages([]);
     setElapsedByMessage({});
     setOpenRef(null);
