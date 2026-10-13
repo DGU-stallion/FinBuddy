@@ -117,7 +117,7 @@ docs/adr/                     已定决策（ADR-0001 / 0002）
 .scratch/finbuddy-agent/      spec 与分票（T1..T5）的工作记录
 ```
 
-### lib 的 16 个 seam
+### lib 的 17 个 seam
 
 每个模块开头都写明「Seam N + 设计要点」。这是刻意设计：**纯逻辑与 React 分离**，
 所以"角标怎么判定失效""多轮摘要带什么"这类核心规则可以被精确单测，而不是埋进 JSX。
@@ -140,6 +140,7 @@ docs/adr/                     已定决策（ADR-0001 / 0002）
 | 14 | `vocabulary.ts` | 合规词表单一事实来源 |
 | 15 | `markdown.ts` | 正文极小子集 Markdown 解析（真机正文含 `**` 与 `- `） |
 | 16 | `rerun.ts` | 标签微调后的重跑提问构造 |
+| 17 | `payload-fields.ts` | 网关 payload 字段提取（跨模块共享的形状适配） |
 
 此外 `gateway.ts` / `fuyao.ts` / `ifind.ts` / `financials.ts` / `refs.ts` / `fallback.ts` /
 `intent.ts` 属于数据接入层，不编号。
@@ -182,8 +183,8 @@ npm run test:compliance   # 合规测试集（打真实 /api/chat）
 当前状态（2026-10-13）：
 
 ```
-Test Files  37 passed (37)
-Tests       384 passed | 2 skipped (386)
+Test Files  39 passed (39)
+Tests       467 passed | 2 skipped (469)
 tsc --noEmit  干净
 next build    Compiled successfully
 ```
@@ -241,6 +242,9 @@ npx tsx scripts/t5-verify.mts                   # 两个预置案例的测算参
 | 8 | 兜底计划丢失标的名 | 代码评审 | 兜底命题变成"该标的" |
 | 9 | **`杠杆` 误分类致真机 8 次运行误报 5 次以上** | 集成测试不稳定，追查告警原文 | 前端对**正确输出**报契约违规；告警频繁后用户学会忽略，整套证据机制名存实亡 |
 | 10 | 多轮把**完整对话历史**送进模型 | 离线端到端断言 | 违反 spec 交互决策，爆 token 且模型绕过摘要复述旧正文 |
+| 11 | **有效税率被硬编码为 15%** 却与净利率并列展示 | Spec 轴评审 | 违反 ADR-0001「参数可追溯」；真机实际为 14.84%/14.54%，且逐季波动 |
+| 12 | 跨轮**存证静默错配**：点第一轮的角标显示最后一轮的 payload | Spec 轴评审 | 违反 ADR-0002 决策 4，且静默无报错，比报错更危险 |
+| 13 | 消歧修复引入**回归**：`费用杠杆`/`信用杠杆`/`利用杠杆效应` 被误判为操作指令 | Standards 轴评审 | 与 #9 同类，同样对正确输出弹告警 |
 
 第 9 条特别值得说明：最初它表现为"集成测试偶尔失败"，很容易被当成负载导致的 flaky 而忽略。
 追查后发现模型写的是「固定成本**杠杆**」「经营**杠杆**」「**杠杆**水平上行」——

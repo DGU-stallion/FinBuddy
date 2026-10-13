@@ -22,7 +22,7 @@ npm run test:compliance   # 合规测试集（需要 dev server）
 
 | 命令 | 结果 |
 |---|---|
-| `npx vitest run` | **Test Files 37 passed (37)；Tests 384 passed \| 2 skipped (386)** |
+| `npx vitest run` | **Test Files 39 passed (39)；Tests 467 passed \| 2 skipped (469)** |
 | `npx tsc --noEmit` | 干净（无输出） |
 | `npm run build` | ✓ Compiled successfully |
 | `npm run lint` | ✓ No ESLint warnings or errors |
@@ -64,7 +64,7 @@ npm run test:compliance   # 合规测试集（需要 dev server）
 
 | 层 | 位置 | 数量 | 证明什么 | 不能证明什么 |
 |---|---|---|---|---|
-| 纯逻辑单测 | `lib/*.test.ts` | 24 个文件 | 校验器/公式**本身**正确（真空期判定、公式精度、词表消歧） | 模型是否照做；UI 是否渲染对 |
+| 纯逻辑单测 | `lib/*.test.ts` | 26 个文件 | 校验器/公式**本身**正确（真空期判定、公式精度、词表消歧） | 模型是否照做；UI 是否渲染对 |
 | 组件测试 (jsdom) | `components/*.test.tsx` | 7 个文件 / 56 项 | 渲染与**交互**（编造角标不可点击、拖滑块零 fetch） | 真实浏览器布局/样式 |
 | 整页渲染 | `tests/page-render.test.tsx` | 10 项 | **页面装配**（data part 接对组件、抽屉联动、合规分流） | 真实流式时序、CSS |
 | 离线端到端 | `tests/route-offline.test.ts` | 12 项 | **路由编排**（mock 模型，零余额依赖） | 模型真实输出质量 |
