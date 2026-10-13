@@ -13,6 +13,9 @@ import { SensitivityCard } from '@/components/SensitivityCard';
 import { ThinkingTimeline } from '@/components/ThinkingTimeline';
 import { IntentTags, type TagEditIntent } from '@/components/IntentTags';
 import { ComplianceNotice } from '@/components/ComplianceNotice';
+import { SessionSidebar } from '@/components/SessionSidebar';
+import { createSessionStore, type Session } from '@/lib/session-store';
+import { shouldPersist, nextTitleFrom, sessionMessagesOf } from '@/lib/session-switch';
 
 /**
  * 问财风对话式页面（浅色 · 单栏对话流）
@@ -65,6 +68,46 @@ export default function WorkbenchPage() {
   const inFlight = useRef(false);
 
   const { messages, sendMessage, status, error, setMessages } = useChat();
+
+  // ---------------------------------------------------------------------------
+  // 会话管理（Seam 18/19）
+  //
+  // 缺口（用户实测提出）：此前只有"清空上下文"，且**刷新即全部丢失** ——
+  // 无法新建/切换会话、无法回看历史，不像成熟的对话产品。
+  // spec 把"历史记录"列入 Out of Scope 但限定为「本地匿名存储」，
+  // 故只做本地持久化，不引入账号体系。
+  //
+  // 实现选择：不换用通用聊天框架（assistant-ui 等）。理由是本项目的难点全在
+  // **领域专用呈现**（自定义 data part 契约、角标强制校验、三栏证据、确定性测算卡），
+  // 框架能替我们做的部分恰好是已经做完的部分，真正的难点它替不了，
+  // 换了反而要丢下 496 条断言的既有验证再做一次数据模型适配。
+  // 因此只在现有架构上补会话层：store（纯逻辑）+ setMessages 切换。
+  // ---------------------------------------------------------------------------
+  const storeRef = useRef<ReturnType<typeof createSessionStore> | null>(null);
+  const [sessions, setSessions] = useState<Session[]>([]);
+  const [currentId, setCurrentId] = useState<string | null>(null);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  /** 惰性初始化 store：只在浏览器端拿 localStorage（SSR 时无此对象）。 */
+  const getStore = useCallback(() => {
+    if (!storeRef.current) {
+      const ls = typeof window !== 'undefined' ? window.localStorage : undefined;
+      storeRef.current = createSessionStore(ls);
+    }
+    return storeRef.current;
+  }, []);
+
+  // 挂载时恢复：有历史则选中最近一个，否则新建一个（空会话也是合法状态）
+  useEffect(() => {
+    const store = getStore();
+    const existing = store.list();
+    const target = existing.length > 0 ? existing[0] : store.create('新对话');
+    setSessions(store.list());
+    setCurrentId(target.id);
+    setMessages(sessionMessagesOf(target) as never);
+    // 只在挂载时执行一次：绑定 store 的回填，不跟随后续 messages 变化
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const busy = status === 'submitted' || status === 'streaming';
 
@@ -194,7 +237,82 @@ export default function WorkbenchPage() {
     [busy, lastView, sendMessage],
   );
 
-  /** 清空上下文（票面要求：避免上一只股票记忆污染）。 */
+  // 落盘：仅在**轮次结束后**写入（shouldPersist，Seam 19）。
+  // 流式途中落盘会把半截正文存下来，用户刷新后看到半句回答会以为模型坏了。
+  useEffect(() => {
+    if (!currentId || messages.length === 0) return;
+    if (!shouldPersist(status)) return;
+    const store = getStore();
+    store.save(currentId, messages);
+    // 首轮提问同时用作标题（用户已手动改名则不覆盖 —— 见 nextTitleFrom）
+    const cur = store.get(currentId);
+    if (cur) {
+      const firstUser = messages.find((m) => m.role === 'user');
+      const text = (firstUser?.parts ?? [])
+        .map((p) => ('text' in p && typeof p.text === 'string' ? p.text : ''))
+        .join(' ')
+        .trim();
+      const nextTitle = nextTitleFrom(cur.title, text);
+      if (nextTitle !== cur.title) store.rename(currentId, nextTitle);
+    }
+    setSessions(store.list());
+  }, [messages, status, currentId, getStore]);
+
+  /** 切到某个会话：换消息内容，并把抽屉/输入等瞬时状态重置。 */
+  const switchSession = useCallback(
+    (id: string) => {
+      if (inFlight.current || busy) return;
+      const store = getStore();
+      const target = store.get(id);
+      if (!target) return;
+      setCurrentId(id);
+      setMessages(sessionMessagesOf(target) as never);
+      setElapsedByMessage({});
+      setOpenRef(null);
+      setInput('');
+      setSidebarOpen(false);
+      stickToBottom.current = true;
+    },
+    [busy, getStore, setMessages],
+  );
+
+  /** 新建会话（并切过去）。 */
+  const newSession = useCallback(() => {
+    if (inFlight.current || busy) return;
+    const store = getStore();
+    const s = store.create('新对话');
+    setSessions(store.list());
+    setCurrentId(s.id);
+    setMessages([]);
+    setElapsedByMessage({});
+    setOpenRef(null);
+    setInput('');
+    setSidebarOpen(false);
+    stickToBottom.current = true;
+  }, [busy, getStore, setMessages]);
+
+  /** 删除会话；若删的是当前会话，则切到剩余最近的或新建一个。 */
+  const removeSession = useCallback(
+    (id: string) => {
+      if (inFlight.current || busy) return;
+      const store = getStore();
+      store.remove(id);
+      const rest = store.list();
+      setSessions(rest);
+      if (id === currentId) {
+        const next = rest.length > 0 ? rest[0] : store.create('新对话');
+        setSessions(store.list());
+        setCurrentId(next.id);
+        setMessages(sessionMessagesOf(next) as never);
+        setElapsedByMessage({});
+        setOpenRef(null);
+      }
+    },
+    [busy, currentId, getStore, setMessages],
+  );
+
+  /** 清空上下文（票面要求：避免上一只股票记忆污染）。
+   *  现在等价于"在当前会话里清空" —— 若想保留旧内容应改用新建会话。 */
   const clearContext = useCallback(() => {
     inFlight.current = false;
     setMessages([]);
@@ -209,14 +327,38 @@ export default function WorkbenchPage() {
   const drawerOffset = openRefId ? { paddingRight: '404px' } : undefined;
 
   return (
-    <main
-      className="flex min-h-screen flex-col bg-page text-ink-1 transition-[padding] duration-300"
-      style={drawerOffset}
-    >
+    // 外层横向布局：左侧会话栏（lg 常驻）+ 右侧主区（顶栏/对话流/输入框）。
+    // 抽屉偏移加在右侧主区上，避免抽屉滑出时把会话栏也一起挤走。
+    <div className="flex min-h-screen bg-page text-ink-1">
+      <SessionSidebar
+        sessions={sessions}
+        currentId={currentId}
+        open={sidebarOpen}
+        disabled={busy}
+        onNew={newSession}
+        onSwitch={switchSession}
+        onRemove={removeSession}
+        onClose={() => setSidebarOpen(false)}
+      />
+
+      <main
+        className="flex min-h-screen min-w-0 flex-1 flex-col bg-page transition-[padding] duration-300"
+        style={drawerOffset}
+      >
       {/* 顶栏：细、不抢视觉；sticky 保证任何滚动位置都能清空上下文 */}
       <header className="sticky top-0 z-20 border-b border-line bg-chat-ai/95 backdrop-blur">
         <div className="mx-auto flex max-w-[880px] items-center justify-between gap-4 px-4 py-2.5">
-          <div className="min-w-0">
+          <div className="flex min-w-0 items-center gap-2">
+            {/* 窄屏下侧栏是抽屉式，需要一个入口；宽屏侧栏常驻故隐藏此按钮 */}
+            <button
+              type="button"
+              onClick={() => setSidebarOpen(true)}
+              title="对话列表"
+              aria-label="打开对话列表"
+              className="shrink-0 rounded-chip px-2 py-1 text-aux text-ink-2 transition-colors hover:bg-page hover:text-brand lg:hidden"
+            >
+              ☰
+            </button>
             <h1 className="truncate text-card font-semibold tracking-tight text-ink-1">
               FinBuddy <span className="font-normal text-ink-2">· 投资命题核验助手</span>
             </h1>
@@ -477,6 +619,7 @@ export default function WorkbenchPage() {
         onClose={() => setOpenRef(null)}
         onNavigate={(refId) => setOpenRef((prev) => (prev ? { ...prev, refId } : prev))}
       />
-    </main>
+      </main>
+    </div>
   );
 }
