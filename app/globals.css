@@ -3,12 +3,22 @@
 @tailwind utilities;
 
 /*
- * 视觉规范（票面）：冷静专业灰蓝配色、红涨绿跌、高密度卡片排版、桌面端 1280px+。
- * 固定深色主题 —— 金融终端惯例，也避免深浅色切换导致语义色（红涨绿跌）反转。
+ * 视觉规范：浅色问财风（同花顺问财 web 语言）。
+ *
+ * 依据：`.scratch/finbuddy-agent/research-wencai-ui.md` —— 从 iwencai.com 线上
+ * bundle 直接提取的 design token（页底 #f4f4f5、用户气泡 #d3e0ff、AI 气泡 #fff、
+ * 蓝主色 #165dff、品牌红 #e93030）。
+ *
+ * 为什么从深色改为浅色：问财是**浅色底 + 蓝主色 + 红点缀**（实证），
+ * 而此前的深色 slate 与该语言方向相反。深色 + 红绿涨跌还会迫使语义色拉高
+ * 饱和度，观感变成"霓虹赌场风"（调研 §4 反例 2）。
+ *
+ * 语义色（涨跌）不直接照抄品牌红 #e93030：它在白底只有 4.26:1，不达 WCAG AA。
+ * 承载信息**内容**的颜色必须可读，故涨跌用深一档的值（见 tailwind.config.ts）。
  */
 :root {
-  --background: #020617; /* slate-950 */
-  --foreground: #f1f5f9; /* slate-100 */
+  --background: #f4f4f5; /* 页底（实证 --bg-color1） */
+  --foreground: #10131f; /* 一级文字（实证 --text-color1） */
 }
 
 html,
@@ -19,10 +29,11 @@ body {
 body {
   color: var(--foreground);
   background: var(--background);
+  /* 字体栈对齐问财实证：Arial / PingFangSC / Microsoft YaHei 体系 */
   font-family:
     var(--font-geist-sans), -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
-    'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
-  /* 高密度排版：数字默认等宽，便于纵向比对 */
+    'Hiragino Sans GB', 'Microsoft YaHei', Arial, sans-serif;
+  /* 高密度排版：数字默认等宽，便于纵向比对（同花顺自研 THSMoneyFont 的替代做法） */
   font-variant-numeric: tabular-nums;
 }
 
@@ -35,27 +46,31 @@ body {
 /* 滑块：细轨道 + 明显拇指，保证 5%~30% 区间内可精细拖动 */
 input[type='range'] {
   height: 1.25rem;
+  background: transparent;
+}
+input[type='range']::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 2px;
+  background: #eaeaeb;
 }
 input[type='range']::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
   width: 1rem;
   height: 1rem;
+  margin-top: -6px; /* 使拇指与 4px 轨道垂直居中 */
   border-radius: 9999px;
-  background: #0ea5e9; /* sky-500 */
-  border: 2px solid #082f49;
+  background: #165dff; /* 品牌蓝（浅色底上比原 sky-500 更清晰） */
+  border: 2px solid #ffffff;
+  box-shadow: 0 1px 2px rgb(16 19 31 / 0.2);
   cursor: pointer;
 }
-input[type='range']::-moz-range-thumb {
-  width: 1rem;
-  height: 1rem;
-  border-radius: 9999px;
-  background: #0ea5e9;
-  border: 2px solid #082f49;
-  cursor: pointer;
+input[type='range']:focus-visible::-webkit-slider-thumb {
+  outline: 2px solid #165dff;
+  outline-offset: 2px;
 }
 
-/* 抽屉滚动条：细、低对比，不抢视觉 */
+/* 滚动条：细、低对比，不抢视觉（浅色主题下的灰色） */
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
@@ -64,9 +79,20 @@ input[type='range']::-moz-range-thumb {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #1e293b; /* slate-800 */
+  background: #d4d4d8;
   border-radius: 4px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #334155; /* slate-700 */
+  background: #a1a1aa;
+}
+
+/* 尊重用户的减少动效偏好（无障碍基线） */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

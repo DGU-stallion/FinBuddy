@@ -23,11 +23,10 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // 不再挂 dark class：问财 web 是浅色语言（实证），留着会误导后续维护者
   return (
-    <html lang="zh-CN" className="dark">
-      <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
-      >
+    <html lang="zh-CN">
+      <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
         {children}
       </body>
     </html>
