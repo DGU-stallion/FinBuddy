@@ -11,6 +11,9 @@
 
 > 本项目**不提供任何投资建议**，不适合作为买卖决策依据。
 
+**仓库**：https://github.com/DGU-stallion/FinBuddy ·
+**在线 Demo**：见 [`DEPLOY.md`](./DEPLOY.md)（部署状态如实记录在该文件末尾）
+
 ---
 
 ## 30 秒理解它想解决什么
