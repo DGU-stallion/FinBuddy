@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { deriveViews } from '@/lib/message-view';
+import { parseBodyLines } from '@/lib/markdown';
 
 /**
  * T4 真实输出回归（真机 fixture → 前端视图模型）
@@ -115,5 +116,34 @@ describe('T4 真实输出回归', () => {
 
   it('确定性：同 fixture 两次解析结果一致', () => {
     expect(viewsFromFixture()).toEqual(viewsFromFixture());
+  });
+});
+
+describe('T4 真实输出回归 · Markdown 渲染（真机正文含 ** 与 - ）', () => {
+  it('真实正文三栏内**不产生字面星号**（曾显示为 **客户订单** 原样外露）', () => {
+    const [v] = viewsFromFixture();
+    const cols = ['支持证据', '反对证据', '无法验证项'];
+    for (const name of cols) {
+      const m = v.body.match(new RegExp(`【${name}】([\\s\\S]*?)(?=【|$)`));
+      expect(m).not.toBeNull();
+      // parseBodyLines 处理后的**可见文本**不得残留 ** 标记
+      const visible = parseBodyLines(m![1].trim())
+        .flatMap((l) => l.token)
+        .map((t) => t.value)
+        .join('');
+      expect(visible, `【${name}】仍含字面 ** 标记`).not.toContain('**');
+    }
+  });
+
+  it('真实正文的加粗内容被识别出来（证明解析确实生效，而非碰巧没有星号）', () => {
+    const [v] = viewsFromFixture();
+    const hasBold = parseBodyLines(v.body).some((l) => l.token.some((t) => t.type === 'bold'));
+    expect(hasBold).toBe(true);
+  });
+
+  it('真实正文的列表项被识别（"- " 不被原样显示）', () => {
+    const [v] = viewsFromFixture();
+    const liCount = parseBodyLines(v.body).filter((l) => l.type === 'li').length;
+    expect(liCount).toBeGreaterThan(0);
   });
 });
