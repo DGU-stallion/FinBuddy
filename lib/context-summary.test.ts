@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildContextSummary, summarizeFacts } from './context-summary';
+import { buildContextSummary, summarizeFacts, selectCurrentTurn } from './context-summary';
 
 /**
  * Seam 10: 多轮上下文结构化摘要（T5，spec 交互决策「多轮上下文」）
@@ -190,5 +190,43 @@ describe('buildContextSummary（只带结构化摘要，不带完整对话）', 
     expect(buildContextSummary(messages as never)!.toPromptText()).toBe(
       buildContextSummary(messages as never)!.toPromptText(),
     );
+  });
+});
+
+describe('selectCurrentTurn（只把当前轮交给模型，历史靠摘要）', () => {
+  const u = (t: string, id: string) => ({ id, role: 'user', parts: [{ type: 'text', text: t }] });
+  const a = (t: string, id: string) => ({ id, role: 'assistant', parts: [{ type: 'text', text: t }] });
+
+  it('返回最后一条用户消息及其后的消息（通常只有它自己）', () => {
+    const msgs = [u('第一问', 'u1'), a('第一答', 'a1'), u('第二问', 'u2')];
+    const out = selectCurrentTurn(msgs as never);
+    expect(out).toHaveLength(1);
+    expect((out[0] as { id: string }).id).toBe('u2');
+  });
+
+  it('只有一条用户消息时原样返回', () => {
+    const out = selectCurrentTurn([u('唯一一问', 'u1')] as never);
+    expect(out).toHaveLength(1);
+  });
+
+  it('不含更早轮次的正文（spec：不带完整对话历史，避免爆 token 与噪音）', () => {
+    const longAnswer = '【支持证据】' + '很长正文。'.repeat(200);
+    const msgs = [u('旧问题', 'u1'), a(longAnswer, 'a1'), u('新问题', 'u2')];
+    const flat = JSON.stringify(selectCurrentTurn(msgs as never));
+    expect(flat).not.toContain('很长正文');
+    expect(flat).toContain('新问题');
+  });
+
+  it('没有用户消息时返回空数组（不把整段历史发出去）', () => {
+    expect(selectCurrentTurn([a('孤儿回答', 'a1')] as never)).toEqual([]);
+  });
+
+  it('空输入返回空数组', () => {
+    expect(selectCurrentTurn([] as never)).toEqual([]);
+  });
+
+  it('确定性：同输入同输出', () => {
+    const msgs = [u('一', 'u1'), a('答', 'a1'), u('二', 'u2')];
+    expect(selectCurrentTurn(msgs as never)).toEqual(selectCurrentTurn(msgs as never));
   });
 });

@@ -191,3 +191,23 @@ export function buildContextSummary(messages: readonly MessageLike[]): ContextSu
     },
   };
 }
+
+/**
+ * 只取出「当前轮」的消息交给模型。
+ *
+ * spec 交互决策：多轮**带历史但只带结构化结论摘要**，不带完整对话历史
+ * （避免爆 token 与噪音）。而历史靠 buildContextSummary 压缩后注入 system。
+ *
+ * 因此送进模型的对话部分应当只有最后一条用户消息（及其后可能出现的
+ * 同轮续写消息），历史一律不进 messages。
+ *
+ * 为什么必须在代码里强制：模型拿不到完整旧对话，才会真的去读 system 里的
+ * 结构化摘要；否则它会绕过摘要直接复述旧正文，摘要就白做了。
+ */
+export function selectCurrentTurn(messages: readonly MessageLike[]): MessageLike[] {
+  const list = Array.isArray(messages) ? messages : [];
+  for (let i = list.length - 1; i >= 0; i--) {
+    if (list[i].role === 'user') return list.slice(i) as MessageLike[];
+  }
+  return [];
+}

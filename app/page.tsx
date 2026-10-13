@@ -4,6 +4,7 @@ import { useChat } from '@ai-sdk/react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { deriveViews, streamingIdFromStatus } from '@/lib/message-view';
 import { listFallbackCases } from '@/lib/fallback';
+import { PRESET_CASES } from '@/lib/preset-cases';
 import { EvidenceColumns } from '@/components/EvidenceColumns';
 import { EvidenceDrawer } from '@/components/EvidenceDrawer';
 import { SensitivityCard } from '@/components/SensitivityCard';
@@ -20,21 +21,6 @@ import { ComplianceNotice } from '@/components/ComplianceNotice';
  * - 降级指示灯、契约违规提示、命题兜底标注都必须显式可见（不隐藏坏消息）。
  * - 预置案例来自 lib/fallback.ts（不硬编码）。
  */
-
-const PRESET_CASES = [
-  {
-    key: '300308',
-    title: '中际旭创 · 大客户砍单核验',
-    question: '中际旭创大客户砍单传闻导致业绩要崩，这个说法成立吗？',
-    tag: '预置案例 · 真机验证',
-  },
-  {
-    key: '300750',
-    title: '宁德时代 · 固态电池量产跳票',
-    question: '网传宁德时代固态电池量产跳票，公告里有相关披露吗？',
-    tag: '预置案例 · 真机验证',
-  },
-];
 
 export default function WorkbenchPage() {
   const [input, setInput] = useState('');
@@ -174,7 +160,7 @@ export default function WorkbenchPage() {
             <div className="grid grid-cols-2 gap-3">
               {PRESET_CASES.map((c) => (
                 <button
-                  key={c.key}
+                  key={c.thscode}
                   type="button"
                   onClick={() => submit(c.question)}
                   disabled={busy}

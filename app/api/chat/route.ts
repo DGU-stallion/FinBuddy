@@ -34,7 +34,7 @@ import { sanitizeFollowUps } from '@/lib/followups';
 import { validateAnalysisOutput } from '@/lib/output-contract';
 import { checkCitations } from '@/lib/citations';
 import { buildOrchestrationSteps, refKind, extractSubjectHint } from '@/lib/orchestration';
-import { buildContextSummary } from '@/lib/context-summary';
+import { buildContextSummary, selectCurrentTurn } from '@/lib/context-summary';
 
 // T4 前端消费的 data part 名（route 文件只得导出 HTTP 方法，故不 export 此常量）
 const PART = {
@@ -175,7 +175,10 @@ export async function POST(req: NextRequest) {
   const result = streamText({
     model: deepseek(MODEL_ID),
     system: buildSystemPrompt(plan, priorSummary?.toPromptText()),
-    messages: await convertToModelMessages(messages),
+    // spec 交互决策：只带**结构化结论摘要**（已注入 system），
+    // 不把完整对话历史送进模型 —— 否则爆 token 且噪音污染，
+    // 模型也会绕过摘要直接复述旧正文。
+    messages: await convertToModelMessages(selectCurrentTurn(messages) as UIMessage[]),
     stopWhen: stepCountIs(5),
     tools: {
       lookupStockSnapshot: tool({
