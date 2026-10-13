@@ -22,7 +22,7 @@ npm run test:compliance   # 合规测试集（需要 dev server）
 
 | 命令 | 结果 |
 |---|---|
-| `npx vitest run` | **Test Files 39 passed (39)；Tests 467 passed \| 2 skipped (469)** |
+| `npx vitest run` | **Test Files 39 passed (39)；Tests 476 passed (476)** |
 | `npx tsc --noEmit` | 干净（无输出） |
 | `npm run build` | ✓ Compiled successfully |
 | `npm run lint` | ✓ No ESLint warnings or errors |

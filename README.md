@@ -184,7 +184,7 @@ npm run test:compliance   # 合规测试集（打真实 /api/chat）
 
 ```
 Test Files  39 passed (39)
-Tests       467 passed | 2 skipped (469)
+Tests       476 passed (476)
 tsc --noEmit  干净
 next build    Compiled successfully
 ```
