@@ -6,6 +6,7 @@ import { deriveViews, streamingIdFromStatus } from '@/lib/message-view';
 import { listFallbackCases } from '@/lib/fallback';
 import { PRESET_CASES } from '@/lib/preset-cases';
 import { buildRerunText } from '@/lib/rerun';
+import { activeStepIndex } from '@/lib/orchestration';
 import { EvidenceColumns } from '@/components/EvidenceColumns';
 import { EvidenceDrawer } from '@/components/EvidenceDrawer';
 import { SensitivityCard } from '@/components/SensitivityCard';
@@ -25,9 +26,16 @@ import { ComplianceNotice } from '@/components/ComplianceNotice';
 
 export default function WorkbenchPage() {
   const [input, setInput] = useState('');
-  const [openRefId, setOpenRefId] = useState<string | null>(null);
+  // 抽屉状态必须同时记住**哪一轮**的存证：每轮 refId 都从 ref_1 重新编号，
+  // 只记 refId 会导致跨轮静默错配（点第一轮的 [^ref_1] 显示最后一轮的 payload）。
+  // 见 app/page.tsx 里 drawerRefs 的注释与 tests/page-render.test.tsx 的跨轮用例。
+  const [openRef, setOpenRef] = useState<{ messageId: string; refId: string } | null>(null);
+  const openRefId = openRef?.refId ?? null;
   const [elapsed, setElapsed] = useState<number | null>(null);
-  const startedAt = useRef<number | null>(null);
+  // 耗时必须**按轮次**记：原先是一个全局 elapsed 传给每一轮，
+  // 导致第二轮完成后第一轮的时间轴显示第二轮的耗时（跨轮错配，Spec 轴评审指出）。
+  const [elapsedByMessage, setElapsedByMessage] = useState<Record<string, number>>({});
+  const startedAt = useRef<{ id: string; at: number } | null>(null);
 
   const { messages, sendMessage, status, error, setMessages } = useChat();
 
@@ -42,17 +50,23 @@ export default function WorkbenchPage() {
     [messages, status],
   );
 
-  // 计时：从提交到首个 assistant 消息出现（真实耗时，不伪造）
+  const streamingId = streamingIdFromStatus(status, messages);
+
+  // 计时：每轮从开始流式到该轮结束的**真实耗时**（不伪造），按 messageId 记账。
   useEffect(() => {
-    if (busy && startedAt.current === null) {
-      startedAt.current = Date.now();
-      setElapsed(null);
+    if (streamingId) {
+      if (startedAt.current?.id !== streamingId) {
+        startedAt.current = { id: streamingId, at: Date.now() };
+      }
+      return;
     }
-    if (!busy && startedAt.current !== null) {
-      setElapsed(Date.now() - startedAt.current);
+    const started = startedAt.current;
+    if (started) {
       startedAt.current = null;
+      const cost = Date.now() - started.at;
+      setElapsedByMessage((prev) => ({ ...prev, [started.id]: cost }));
     }
-  }, [busy]);
+  }, [streamingId]);
 
   // 抽屉打开时禁止背景滚动（380px 抽屉覆盖正文）
   useEffect(() => {
@@ -63,7 +77,10 @@ export default function WorkbenchPage() {
   }, [openRefId]);
 
   const lastView = views.length > 0 ? views[views.length - 1] : null;
-  const drawerRefs = lastView?.refs ?? [];
+  // 抽屉的存证集合取自**打开它的那一轮**（ADR-0002 决策 4：以该轮原始 payload 为准）。
+  // 取 lastView 会错配：两轮都从 ref_1 编号，点第一轮的角标会显示最后一轮的数据。
+  const openView = openRef ? views.find((v) => v.messageId === openRef.messageId) ?? null : null;
+  const drawerRefs = openView?.refs ?? [];
 
   const submit = useCallback(
     (text: string) => {
@@ -71,7 +88,7 @@ export default function WorkbenchPage() {
       if (q === '' || busy) return;
       sendMessage({ text: q });
       setInput('');
-      setOpenRefId(null);
+      setOpenRef(null);
     },
     [busy, sendMessage],
   );
@@ -90,7 +107,7 @@ export default function WorkbenchPage() {
         nextTags: intent.nextTags,
         base: lastView?.plan?.reframedClaim ?? lastView?.userText ?? '',
       });
-      setOpenRefId(null);
+      setOpenRef(null);
       sendMessage({ text });
     },
     [busy, lastView, sendMessage],
@@ -99,7 +116,8 @@ export default function WorkbenchPage() {
   /** 清空上下文（票面要求：避免上一只股票记忆污染）。 */
   const clearContext = useCallback(() => {
     setMessages([]);
-    setOpenRefId(null);
+    setElapsedByMessage({});
+    setOpenRef(null);
     setInput('');
   }, [setMessages]);
 
@@ -204,8 +222,12 @@ export default function WorkbenchPage() {
                 <>
                   <ThinkingTimeline
                     steps={v.steps}
-                    activeIndex={v.streaming ? v.steps.length - 1 : null}
-                    elapsedMs={v.streaming ? null : elapsed}
+                    activeIndex={
+                      v.streaming
+                        ? activeStepIndex(v.steps, v.arrivedParts)
+                        : null
+                    }
+                    elapsedMs={v.streaming ? null : elapsedByMessage[v.messageId] ?? null}
                   />
 
                   {/* 意图标签（可微调） */}
@@ -254,7 +276,8 @@ export default function WorkbenchPage() {
                     <EvidenceColumns
                       text={v.body}
                       refs={v.refs}
-                      onOpenRef={setOpenRefId}
+                      onOpenRef={(refId, messageId) => setOpenRef({ refId, messageId })}
+                      messageId={v.messageId}
                       compressed={openRefId !== null}
                     />
                   )}
@@ -334,8 +357,8 @@ export default function WorkbenchPage() {
       <EvidenceDrawer
         refId={openRefId}
         refs={drawerRefs}
-        onClose={() => setOpenRefId(null)}
-        onNavigate={setOpenRefId}
+        onClose={() => setOpenRef(null)}
+        onNavigate={(refId) => setOpenRef((prev) => (prev ? { ...prev, refId } : prev))}
       />
     </main>
   );

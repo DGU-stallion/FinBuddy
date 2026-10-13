@@ -28,10 +28,12 @@ function Inline({
   tokens,
   allowed,
   onOpenRef,
+  messageId,
 }: {
   tokens: InlineToken[];
   allowed: readonly string[];
-  onOpenRef: (refId: string) => void;
+  onOpenRef: (refId: string, messageId: string) => void;
+  messageId: string;
 }) {
   return (
     <>
@@ -39,10 +41,21 @@ function Inline({
         t.type === 'bold' ? (
           <strong key={i} className="font-semibold text-slate-200">
             {/* 加粗内部仍可能有角标，所以文本也要过角标校验 */}
-            <CitationText text={t.value} allowedRefIds={allowed} onOpenRef={onOpenRef} />
+            <CitationText
+              text={t.value}
+              allowedRefIds={allowed}
+              onOpenRef={onOpenRef}
+              messageId={messageId}
+            />
           </strong>
         ) : (
-          <CitationText key={i} text={t.value} allowedRefIds={allowed} onOpenRef={onOpenRef} />
+          <CitationText
+            key={i}
+            text={t.value}
+            allowedRefIds={allowed}
+            onOpenRef={onOpenRef}
+            messageId={messageId}
+          />
         ),
       )}
     </>
@@ -53,12 +66,15 @@ export function EvidenceColumns({
   text,
   refs,
   onOpenRef,
+  messageId,
   /** 抽屉打开时压缩栏宽（spec：滑出时三栏流式压缩，证据与出处同屏对照）。 */
   compressed,
 }: {
   text: string;
   refs: readonly RefEntry[];
-  onOpenRef: (refId: string) => void;
+  onOpenRef: (refId: string, messageId: string) => void;
+  /** 本栏所属轮次的消息 id（跨轮存证隔离，见 app/page.tsx 的 drawerRefs）。 */
+  messageId: string;
   compressed?: boolean;
 }) {
   const columns = splitEvidence(text);
@@ -104,7 +120,7 @@ export function EvidenceColumns({
                     {line.type === 'li' && (
                       <span className="absolute left-0 text-slate-600">•</span>
                     )}
-                    <Inline tokens={line.token} allowed={allowed} onOpenRef={onOpenRef} />
+                    <Inline tokens={line.token} allowed={allowed} onOpenRef={onOpenRef} messageId={messageId} />
                   </li>
                 ))}
               </ul>

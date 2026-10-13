@@ -150,8 +150,8 @@ export function SensitivityCard({ params }: { params: SensitivityInjectParams | 
         </div>
         <div className="mt-1 text-[11px] text-slate-500">
           参数溯源：<span className="font-mono text-slate-400">[{params.refId}]</span>
-          （基准营收 {yi(params.baseRevenue)} · 净利率 {params.netMargin.toFixed(2)}% · 所得税率{' '}
-          {params.taxRate.toFixed(2)}%）
+          （基准营收 {yi(params.baseRevenue)} · 净利率 {params.netMargin.toFixed(2)}% · 有效所得税率{' '}
+          {params.taxRate.toFixed(2)}%<span className="text-slate-600">（由利润表推导：Σ所得税费用 ÷ Σ税前利润）</span>）
         </div>
       </div>
 

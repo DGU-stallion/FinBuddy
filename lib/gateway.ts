@@ -15,7 +15,7 @@
 
 import { callFuyaoTool } from './fuyao';
 import { callIfindTool } from './ifind';
-import { sumTTM, type QuarterlyIncome, type RevenueBasis } from './financials';
+import { sumTTM, effectiveTaxRate, type QuarterlyIncome, type RevenueBasis } from './financials';
 import type { SnapshotPayload, FinancialsPayload } from './format';
 import { getFallbackSnapshot, type FallbackRecord } from './fallback';
 
@@ -56,6 +56,10 @@ interface IncomeData {
     fiscal_period?: string;
     operating_income?: number;
     net_profit?: number;
+    /** 税前利润（真机确认字段名；用于推导有效税率）。 */
+    profit_total?: number;
+    /** 所得税费用（真机确认字段名；用于推导有效税率）。 */
+    income_tax_expense?: number;
   }>;
 }
 
@@ -163,9 +167,15 @@ export async function lookupFinancialReport(
     fiscalPeriod: it.fiscal_period ?? '',
     operatingIncome: it.operating_income ?? NaN,
     netProfit: it.net_profit ?? NaN,
+    // 有效税率所需字段（扶摇利润表实际返回；见 lib/financials.ts effectiveTaxRate）
+    profitTotal: it.profit_total ?? NaN,
+    incomeTaxExpense: it.income_tax_expense ?? NaN,
   }));
 
   const ttm = sumTTM(periods);
+  // 有效所得税率由利润表推导（原为硬编码 15，违反 ADR-0001 "参数可追溯"；
+  // 真机实测中际旭创 14.84%、宁德时代 14.54%，逐季波动 13.86%~16.18%）。
+  const tax = effectiveTaxRate(periods);
 
   // 财务指标（净利率/毛利率/税率）单独取；失败不阻断营收链路
   let netMargin: number | undefined;
@@ -205,7 +215,8 @@ export async function lookupFinancialReport(
     revenueBasis: ttm.basis,
     netMargin,
     grossMargin,
-    taxRate: 15, // A 股高新技术企业常见优惠税率；口径见 UI 声明
+    // 推导失败则保持 undefined，由 format/UI 显式声明"缺失"并拒绝测算
+    taxRate: tax?.pct,
     data: {
       thscode,
       report,
@@ -213,7 +224,7 @@ export async function lookupFinancialReport(
       revenueBasis: ttm.basis,
       netMargin,
       grossMargin,
-      taxRate: 15,
+      taxRate: tax?.pct,
     },
   };
 }

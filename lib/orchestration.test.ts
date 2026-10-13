@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildOrchestrationSteps, refKind, extractSubjectHint } from './orchestration';
+import { buildOrchestrationSteps, refKind, extractSubjectHint, activeStepIndex } from './orchestration';
 import type { AnalysisPlan } from './analysis';
 
 /**
@@ -90,5 +90,55 @@ describe('extractSubjectHint（兜底计划的标的不丢失）', () => {
 
   it('确定性：同输入同输出', () => {
     expect(extractSubjectHint('宁德时代')).toBe(extractSubjectHint('宁德时代'));
+  });
+});
+
+describe('activeStepIndex（时间轴步进必须反映真实进度）', () => {
+  // T4 Spec 轴评审缺陷：原实现是 `streaming ? steps.length - 1 : null`，
+  // 把「正在执行」永久钉在最后一步（三栏证据对齐），其余步骤全显示为已完成 ——
+  // 与真实执行状态不符（工具其实还在调）。
+  //
+  // 改为按**已到达的 data part**推断：这是可机械判定的真实信号。
+  const steps = buildOrchestrationSteps(plan, true);
+  const idxOf = (id: string) => steps.findIndex((s) => s.id === id);
+
+  it('尚未收到任何 part 时从第一步开始', () => {
+    expect(activeStepIndex(steps, [])).toBe(0);
+  });
+
+  it('收到 steps 但未收到 plan → 命题重构进行中（不是最后一步）', () => {
+    expect(activeStepIndex(steps, ['data-steps'])).toBe(idxOf('step-reframe'));
+  });
+
+  it('收到 plan 但工具未返回 → 子问题核验进行中', () => {
+    const i = activeStepIndex(steps, ['data-steps', 'data-plan']);
+    expect(i).toBe(idxOf('step-sub-1'));
+  });
+
+  it('收到 refs（工具已返回）但未收到 contract → 三栏对齐进行中', () => {
+    const i = activeStepIndex(steps, ['data-steps', 'data-plan', 'data-refs']);
+    expect(i).toBe(idxOf('step-synthesis'));
+  });
+
+  it('收到 contract（成稿校验完成）→ null（全部完成）', () => {
+    expect(
+      activeStepIndex(steps, ['data-steps', 'data-plan', 'data-refs', 'data-contract']),
+    ).toBeNull();
+  });
+
+  it('多子问题时，子问题核验指针不会停在最后一个子问题', () => {
+    const i = activeStepIndex(steps, ['data-steps', 'data-plan']);
+    expect(i).not.toBeNull();
+    // plan 里有两个子问题：应指向 step-sub-1，而不是 step-sub-2
+    expect(steps[i!].id).toBe('step-sub-1');
+  });
+
+  it('步骤清单为空时返回 null（不越界）', () => {
+    expect(activeStepIndex([], ['data-steps'])).toBeNull();
+  });
+
+  it('确定性：同输入同输出', () => {
+    const parts = ['data-steps', 'data-plan'];
+    expect(activeStepIndex(steps, parts)).toBe(activeStepIndex(steps, parts));
   });
 });

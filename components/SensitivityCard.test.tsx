@@ -106,3 +106,17 @@ describe('SensitivityCard', () => {
     expect(slider.max).toBe('30');
   });
 });
+
+describe('税率来源必须显式标注（T4 Spec 轴评审缺陷）', () => {
+  it('标注"有效所得税率"并说明是推导值，不冒充接口字段', () => {
+    render(<SensitivityCard params={params} />);
+    const t = document.body.textContent ?? '';
+    expect(t).toContain('有效所得税率');
+    expect(t).toMatch(/推导/);
+  });
+
+  it('展示推导后的真实数值（真机 14.84，而非硬编码 15）', () => {
+    render(<SensitivityCard params={{ ...params, taxRate: 14.84 }} />);
+    expect(document.body.textContent).toContain('14.84');
+  });
+});

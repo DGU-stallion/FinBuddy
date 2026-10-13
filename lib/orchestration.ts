@@ -114,3 +114,57 @@ export function extractSubjectHint(userText: string): string | null {
 
   return null;
 }
+
+/**
+ * 由**已到达的 data part** 推断时间轴当前进行到哪一步。
+ *
+ * 为什么不能在流式期间一律指向最后一步（T4 Spec 轴评审抓出的缺陷）：
+ * 原实现是 `streaming ? steps.length - 1 : null`，把「正在执行」永久钉在
+ * 最后一步（三栏证据对齐），其余步骤全部显示为已完成（绿点）—— 但那时
+ * 工具调用其实还在进行。时间轴的「步进状态」因此是装饰性的，
+ * 与真实执行进度不符，而票面明确要求展示"步进状态"。
+ *
+ * 改为按 part 到达情况推断，这是**可机械判定的真实信号**：
+ *   - 收到 data-steps（步骤清单本身）→ 命题重构即将/正在发生
+ *   - 收到 data-plan（计划已确认）→ 进入子问题核验
+ *   - 收到 data-refs（工具已返回）→ 进入三栏对齐
+ *   - 收到 data-contract（成稿校验完成）→ 全部完成 → null
+ *
+ * 注意：这是**下界近似**，不是精确进度。因为 data-steps 是在 merge 模型流
+ * **之前**一次性写入的，前端无法知道「第 2 个子问题查完没」。
+ * 宁可给一个诚实的下界，也不要给一个必然错误的"最后一步"。
+ *
+ * @returns 当前步骤下标；全部完成或无线索时返回 null。
+ */
+export function activeStepIndex(
+  steps: readonly OrchestrationStep[],
+  arrivedParts: readonly string[],
+): number | null {
+  if (steps.length === 0) return null;
+  const arrived = new Set(arrivedParts);
+
+  // 成稿校验完成 → 无进行中步骤
+  if (arrived.has('data-contract')) return null;
+
+  const find = (id: string): number => steps.findIndex((s) => s.id === id);
+
+  // 工具已返回 → 三栏对齐中
+  if (arrived.has('data-refs')) {
+    const i = find('step-synthesis');
+    return i >= 0 ? i : steps.length - 1;
+  }
+
+  // 计划已确认 → 子问题核验中（指向**第一个**子问题，而非最后一个）
+  if (arrived.has('data-plan')) {
+    const i = steps.findIndex((s) => s.id.startsWith('step-sub-'));
+    return i >= 0 ? i : steps.length - 1;
+  }
+
+  // 步骤清单已到 → 命题重构（步骤清单整批先到，故指向重构而非合规校验）
+  if (arrived.has('data-steps')) {
+    const i = find('step-reframe');
+    return i >= 0 ? i : 0;
+  }
+
+  return 0;
+}

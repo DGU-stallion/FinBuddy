@@ -30,7 +30,7 @@ const BODY = [
 describe('EvidenceColumns', () => {
   it('始终渲染三列（即使某栏缺失）', () => {
     render(
-      <EvidenceColumns text="【支持证据】只有这一栏。" refs={refs} onOpenRef={() => {}} />,
+      <EvidenceColumns text="【支持证据】只有这一栏。" refs={refs} onOpenRef={() => {}} messageId="m1" />,
     );
     // 三个栏标题都必须在场
     expect(screen.getByText('支持证据')).toBeDefined();
@@ -39,13 +39,13 @@ describe('EvidenceColumns', () => {
   });
 
   it('缺失栏显式提示，不静默隐藏', () => {
-    render(<EvidenceColumns text="【支持证据】x" refs={refs} onOpenRef={() => {}} />);
+    render(<EvidenceColumns text="【支持证据】x" refs={refs} onOpenRef={() => {}} messageId="m1" />);
     expect(document.body.textContent).toMatch(/本栏缺失|本栏为空/);
   });
 
   it('**加粗** 渲染为粗体元素，星号不外露（真机回归）', () => {
     const body = '【支持证据】公司**并无经历任何客户订单**变化。\n【反对证据】x\n【无法验证项】y';
-    render(<EvidenceColumns text={body} refs={refs} onOpenRef={() => {}} />);
+    render(<EvidenceColumns text={body} refs={refs} onOpenRef={() => {}} messageId="m1" />);
 
     const txt = document.body.textContent ?? '';
     // 关键：页面上不能出现字面星号
@@ -60,7 +60,7 @@ describe('EvidenceColumns', () => {
 
   it('行首 "- " 渲染为列表项，标记不外露', () => {
     const body = '【支持证据】\n- 第一项\n- 第二项\n【反对证据】x\n【无法验证项】y';
-    render(<EvidenceColumns text={body} refs={refs} onOpenRef={() => {}} />);
+    render(<EvidenceColumns text={body} refs={refs} onOpenRef={() => {}} messageId="m1" />);
 
     expect(document.querySelectorAll('li').length).toBeGreaterThanOrEqual(2);
     expect(document.body.textContent).not.toContain('- 第一项');
@@ -68,20 +68,20 @@ describe('EvidenceColumns', () => {
   });
 
   it('有效角标渲染为可点击按钮（走强制校验）', () => {
-    render(<EvidenceColumns text={BODY} refs={refs} onOpenRef={() => {}} />);
+    render(<EvidenceColumns text={BODY} refs={refs} onOpenRef={() => {}} messageId="m1" />);
     expect(screen.getByRole('button', { name: /ref_1/ })).toBeDefined();
   });
 
   it('编造角标渲染为"引用失效"且不是按钮', () => {
     const body = '【支持证据】传闻已澄清[^ref_9]。\n【反对证据】x\n【无法验证项】y';
-    render(<EvidenceColumns text={body} refs={refs} onOpenRef={() => {}} />);
+    render(<EvidenceColumns text={body} refs={refs} onOpenRef={() => {}} messageId="m1" />);
     expect(screen.queryAllByRole('button')).toHaveLength(0);
     expect(screen.getByLabelText(/引用失效 ref_9/)).toBeDefined();
   });
 
   it('抽屉打开时三栏压缩（传 compressed）', () => {
     const { container } = render(
-      <EvidenceColumns text={BODY} refs={refs} onOpenRef={() => {}} compressed />,
+      <EvidenceColumns text={BODY} refs={refs} onOpenRef={() => {}} messageId="m1" compressed />,
     );
     expect(container.querySelector('.grid')?.className).toContain('text-[11px]');
   });

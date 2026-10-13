@@ -256,3 +256,127 @@ describe('deriveViews · 降级与流式', () => {
     expect(v.streaming).toBe(false);
   });
 });
+
+describe('跨轮存证隔离（T4 Spec 轴评审抓出的静默错配）', () => {
+  // 问题：每轮 refId 都从 ref_1 重新编号（lib/refs.ts 按请求实例分配）。
+  // 若抽屉总取"最后一轮"的 refs，追问后点击第一轮正文的 [^ref_1]，
+  // 会**静默展示最后一轮的 payload**（第一轮中际旭创的角标点开是宁德时代行情）。
+  // 更糟：若第一轮 refId 超出最后一轮数量，合法角标会显示"疑似编造引用"。
+  it('每一轮的 allowedRefIds 只含该轮自己的存证（跨轮不混用）', () => {
+    const turn = (id: string, refId: string, name: string) => ({
+      id,
+      role: 'assistant',
+      parts: [
+        { type: 'data-steps', id: 'steps', data: { steps: [] } },
+        {
+          type: 'data-refs',
+          id: 'refs',
+          data: {
+            refs: [
+              {
+                refId,
+                kind: 'snapshot',
+                payload: { refId, source: '扶摇 · 行情/估值快照', asOf: 1, isFallback: false, data: { name, thscode: 'x' } },
+              },
+            ],
+          },
+        },
+        { type: 'text', text: `【支持证据】${name}[^${refId}]。`, state: 'done' },
+      ],
+    });
+
+    const views = deriveViews({
+      messages: [
+        { id: 'u1', role: 'user', parts: [{ type: 'text', text: '中际旭创' }] },
+        turn('a1', 'ref_1', '中际旭创'),
+        { id: 'u2', role: 'user', parts: [{ type: 'text', text: '宁德时代' }] },
+        turn('a2', 'ref_1', '宁德时代'),
+      ] as never,
+    });
+
+    expect(views).toHaveLength(2);
+    // 两轮都叫 ref_1，但各自的存证必须属于自己的 payload
+    expect((views[0].refs[0].payload as { data: { name: string } }).data.name).toBe('中际旭创');
+    expect((views[1].refs[0].payload as { data: { name: string } }).data.name).toBe('宁德时代');
+    // 且每轮的校验集合就是自己那一条
+    expect(views[0].allowedRefIds).toEqual(['ref_1']);
+    expect(views[1].allowedRefIds).toEqual(['ref_1']);
+  });
+
+  it('第一轮 refId 超出最后一轮数量时，仍按第一轮自己的集合判定有效', () => {
+    const views = deriveViews({
+      messages: [
+        { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'q1' }] },
+        {
+          id: 'a1',
+          role: 'assistant',
+          parts: [
+            {
+              type: 'data-refs',
+              id: 'refs',
+              data: {
+                refs: [
+                  { refId: 'ref_1', kind: 'snapshot', payload: { refId: 'ref_1', data: {} } },
+                  { refId: 'ref_2', kind: 'financials', payload: { refId: 'ref_2', data: {} } },
+                ],
+              },
+            },
+            { type: 'text', text: '正文[^ref_2]', state: 'done' },
+          ],
+        },
+        { id: 'u2', role: 'user', parts: [{ type: 'text', text: 'q2' }] },
+        {
+          id: 'a2',
+          role: 'assistant',
+          parts: [
+            {
+              type: 'data-refs',
+              id: 'refs',
+              data: { refs: [{ refId: 'ref_1', kind: 'snapshot', payload: { refId: 'ref_1', data: {} } }] },
+            },
+            { type: 'text', text: '正文[^ref_1]', state: 'done' },
+          ],
+        },
+      ] as never,
+    });
+
+    // 第一轮的 ref_2 属于第一轮集合 → 有效（不会被最后一轮的少集合判成编造）
+    expect(views[0].allowedRefIds).toContain('ref_2');
+    expect(views[1].allowedRefIds).toEqual(['ref_1']);
+  });
+});
+
+describe('arrivedParts（供时间轴推断真实进度）', () => {
+  it('列出该轮已到达的 data part 名（不含 text）', () => {
+    const [v] = deriveViews({
+      messages: [
+        user('x'),
+        asst([STEPS, PLAN, BODY]),
+      ],
+    });
+    expect(v.arrivedParts).toContain('data-steps');
+    expect(v.arrivedParts).toContain('data-plan');
+    expect(v.arrivedParts).not.toContain('data-contract');
+    expect(v.arrivedParts.every((p) => p.startsWith('data-'))).toBe(true);
+  });
+
+  it('全部到达时含 contract 与 followups', () => {
+    const [v] = deriveViews({ messages: [user('x'), asst([STEPS, PLAN, BODY, REFS, CONTRACT, FOLLOWUPS])] });
+    expect(v.arrivedParts).toEqual(
+      expect.arrayContaining(['data-steps', 'data-plan', 'data-refs', 'data-contract', 'data-followups']),
+    );
+  });
+
+  it('合规轮次不含任何分析 part', () => {
+    const [v] = deriveViews({
+      messages: [
+        user('买入吗'),
+        asst([
+          { type: 'data-compliance', id: 'compliance', data: { layer: 'keyword' } },
+          { type: 'text', text: 'x', state: 'done' },
+        ]),
+      ],
+    });
+    expect(v.arrivedParts).not.toContain('data-plan');
+  });
+});

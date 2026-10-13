@@ -45,6 +45,8 @@ export interface AssistantView {
   /** 敏感性测算参数（来自 financials 存证）；不可测算为 null。 */
   sensitivityParams: SensitivityInjectParams | null;
   complianceLayer: ComplianceLayerName | null;
+  /** 该轮已到达的 data part 名单（供时间轴推断真实进行到哪一步）。 */
+  arrivedParts: string[];
   /** 该轮是否仍在流式接收中。 */
   streaming: boolean;
 }
@@ -203,6 +205,10 @@ export function deriveViews(input: DeriveInput): AssistantView[] {
       degraded: complianceLayer ? null : detectDegraded(refs),
       sensitivityParams: complianceLayer ? null : extractSensitivityParams(refs),
       complianceLayer,
+      // 只收集 data-* part 名：这是"真实进度"的机械信号（见 lib/orchestration.ts activeStepIndex）
+      arrivedParts: parts
+        .map((p) => (typeof p.type === 'string' ? p.type : ''))
+        .filter((t) => t.startsWith('data-')),
       streaming: input.streamingMessageId != null && input.streamingMessageId === messageId,
     });
   }

@@ -256,3 +256,38 @@ describe('summarizeRef · 视觉规范（红涨绿跌，票面要求）', () => 
     expect(z.fields.find((f) => f.label === '涨跌幅')?.tone).toBeUndefined();
   });
 });
+
+describe('summarizeRef · 税率来源标注（不得让推导值冒充接口字段）', () => {
+  it('所得税率标注为"推导"并说明口径（T4 Spec 轴评审缺陷）', () => {
+    const s = summarizeRef(
+      {
+        refId: 'ref_3',
+        source: '扶摇 · 利润表/财务指标',
+        asOf: 1,
+        isFallback: false,
+        baseRevenue: 1e11,
+        revenueBasis: 'TTM',
+        netMargin: 10,
+        grossMargin: 20,
+        taxRate: 14.84,
+        data: {},
+      },
+      'financials',
+    );
+    const tax = s.fields.find((f) => f.label.includes('所得税率'));
+    expect(tax).toBeDefined();
+    // 必须是推导口径，而不是让人误以为是接口直出的字段
+    expect(tax!.label).toContain('有效');
+    expect(tax!.value).toContain('14.84');
+    expect(tax!.value).toMatch(/推导|计算|Σ|税前/);
+  });
+
+  it('税率缺失时写"缺失"，不得回退默认值', () => {
+    const s = summarizeRef(
+      { refId: 'ref_9', source: 'x', asOf: 1, isFallback: false, baseRevenue: 1e8, revenueBasis: 'TTM', netMargin: 10, data: {} },
+      'financials',
+    );
+    const tax = s.fields.find((f) => f.label.includes('所得税率'));
+    expect(tax!.value).toBe('缺失');
+  });
+});

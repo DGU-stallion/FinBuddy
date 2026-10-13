@@ -16,10 +16,15 @@ export function CitationText({
   text,
   allowedRefIds,
   onOpenRef,
+  messageId,
 }: {
   text: string;
   allowedRefIds: readonly string[];
-  onOpenRef: (refId: string) => void;
+  /** 打开存证抽屉。第二参为所属轮次的消息 id —— 每轮 refId 会重编号，
+   *  只传 refId 会导致跨轮静默错配（见 components/EvidenceColumns.tsx 注释）。 */
+  onOpenRef: (refId: string, messageId: string) => void;
+  /** 本角标所属轮次的消息 id。 */
+  messageId: string;
 }) {
   const tokens = tokenizeCitations(text, allowedRefIds);
 
@@ -46,7 +51,7 @@ export function CitationText({
           <button
             key={i}
             type="button"
-            onClick={() => onOpenRef(t.refId)}
+            onClick={() => onOpenRef(t.refId, messageId)}
             className="mx-0.5 rounded border border-sky-700/60 bg-sky-900/40 px-1 align-super text-[10px] text-sky-300 transition-colors hover:border-sky-500 hover:bg-sky-800/60"
             title={`查看存证 ${t.refId}`}
           >

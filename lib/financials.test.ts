@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { sumTTM, type QuarterlyIncome } from './financials';
+import { sumTTM, effectiveTaxRate, type QuarterlyIncome } from './financials';
 
 /**
  * Seam: sumTTM(periods) -> { baseRevenue, basis }
@@ -64,5 +64,91 @@ describe('sumTTM', () => {
     // 有效季只有 3 季 → 降级
     expect(r.basis).toBe('latest_quarter_x4');
     expect(r.baseRevenue).toBeCloseTo(1600e8, 0);
+  });
+});
+
+// ---------- 有效所得税率（T4 Spec 轴评审发现的真实缺陷） ----------
+
+describe('effectiveTaxRate（有效税率必须取自真实字段，不得硬编码）', () => {
+  const p = (year: number, period: string, pretax: number, tax: number): QuarterlyIncome => ({
+    fiscalYear: year,
+    fiscalPeriod: period,
+    operatingIncome: pretax,
+    netProfit: pretax - tax,
+    profitTotal: pretax,
+    incomeTaxExpense: tax,
+  });
+
+  it('按 TTM 口径合并计算：Σ所得税 / Σ税前利润', () => {
+    // 真机 300308.SZ 2026 前后四季（摘自扶摇利润表）
+    const r = effectiveTaxRate([
+      p(2026, 'Q2', 17230602545.84, 2497175782.71),
+      p(2026, 'Q1', 7535801610.11, 1219009583.09),
+      p(2025, 'Q4', 13599623819.76, 2019869711.77),
+      p(2025, 'Q3', 8840494105.85, 1270763014.33),
+    ]);
+    expect(r).not.toBeNull();
+    // 加权合并 ≈ 14.84%（真机实测值）
+    expect(r!.pct).toBeCloseTo(14.84, 1);
+    expect(r!.basis).toBe('TTM');
+    expect(r!.periodsUsed).toBe(4);
+  });
+
+  it('宁德时代真实数据 ≈ 14.54%', () => {
+    const r = effectiveTaxRate([
+      p(2026, 'Q2', 55766857000, 8736218000),
+      p(2026, 'Q1', 26681603000, 3944350000),
+      p(2025, 'Q4', 89526545000, 12740236000),
+      p(2025, 'Q3', 60712402000, 8415535000),
+    ]);
+    expect(r!.pct).toBeCloseTo(14.54, 1);
+  });
+
+  it('与简单平均不同：必须是加权（大额季度权重大）', () => {
+    const r = effectiveTaxRate([
+      p(2026, 'Q2', 1000, 100), // 10%
+      p(2026, 'Q1', 9000, 2700), // 30%
+    ]);
+    // 加权 = 2800/10000 = 28%；算术平均 = 20%
+    expect(r!.pct).toBeCloseTo(28, 6);
+  });
+
+  it('期数不足四季时降级为已有效期内合并，并标注 basis', () => {
+    const r = effectiveTaxRate([p(2026, 'Q2', 1000, 150), p(2026, 'Q1', 1000, 150)]);
+    expect(r!.basis).toBe('partial');
+    expect(r!.periodsUsed).toBe(2);
+    expect(r!.pct).toBeCloseTo(15, 6);
+  });
+
+  it('缺少字段时返回 null（绝不默认一个"看起来正常"的税率）', () => {
+    expect(effectiveTaxRate([])).toBeNull();
+    expect(
+      effectiveTaxRate([
+        { fiscalYear: 2026, fiscalPeriod: 'Q1', operatingIncome: 100, netProfit: 85 },
+      ]),
+    ).toBeNull();
+  });
+
+  it('税前利润为负（亏损）的期不参与合并（负税率无意义）', () => {
+    const r = effectiveTaxRate([
+      p(2026, 'Q2', 1000, 150),
+      p(2026, 'Q1', -500, -100),
+    ]);
+    expect(r!.periodsUsed).toBe(1);
+    expect(r!.pct).toBeCloseTo(15, 6);
+  });
+
+  it('未提供税率字段的期被跳过，而非当作 0（否则会低估税率）', () => {
+    const r = effectiveTaxRate([
+      p(2026, 'Q2', 1000, 150),
+      { fiscalYear: 2026, fiscalPeriod: 'Q1', operatingIncome: 1000, netProfit: 900 },
+    ]);
+    expect(r!.periodsUsed).toBe(1);
+    expect(r!.pct).toBeCloseTo(15, 6);
+  });
+
+  it('确定性：同输入同输出', () => {
+    const periods = [p(2026, 'Q2', 1000, 150)];
+    expect(effectiveTaxRate(periods)).toEqual(effectiveTaxRate(periods));
   });
 });

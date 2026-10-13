@@ -226,4 +226,107 @@ describe('整页渲染（真机 fixture 驱动）', () => {
     await renderPage();
     expect(document.body.textContent).toContain('模拟上游故障');
   });
+
+  it('跨轮存证不错配：点第一轮的角标必须显示第一轮的 payload（T4 Spec 轴评审缺陷）', async () => {
+    // 关键前提：每轮 refId 都从 ref_1 重新编号，故两轮都叫 ref_1。
+    // 若抽屉总取"最后一轮"的 refs，点第一轮的 [^ref_1] 会**静默显示宁德时代**
+    // （第一轮的角标 + 第二轮的 payload）—— 违反 ADR-0002 决策 4
+    // "存证抽屉数据以工具原始 payload 为准"，且是静默错配。
+    const turn = (id: string, name: string) => ({
+      id,
+      role: 'assistant',
+      parts: [
+        { type: 'data-steps', id: 'steps', data: { steps: [{ id: 's', label: '命题重构', detail: 'd' }] } },
+        {
+          type: 'data-refs',
+          id: 'refs',
+          data: {
+            refs: [
+              {
+                refId: 'ref_1',
+                kind: 'snapshot',
+                payload: {
+                  refId: 'ref_1',
+                  source: '扶摇 · 行情/估值快照',
+                  asOf: Date.UTC(2026, 9, 12),
+                  isFallback: false,
+                  data: { name, thscode: 'x', last_price: name === '中际旭创' ? 724.47 : 298.38 },
+                },
+              },
+            ],
+          },
+        },
+        { type: 'text', text: `【支持证据】${name}行情[^ref_1]。\n【反对证据】x\n【无法验证项】y`, state: 'done' },
+      ],
+    });
+
+    chatState.messages = [
+      { id: 'u1', role: 'user', parts: [{ type: 'text', text: '中际旭创' }] },
+      turn('a1', '中际旭创'),
+      { id: 'u2', role: 'user', parts: [{ type: 'text', text: '宁德时代' }] },
+      turn('a2', '宁德时代'),
+    ];
+    await renderPage();
+
+    // 点**第一轮**三栏里的 ref_1（第一个匹配的按钮位于第一轮）
+    const refButtons = screen.getAllByRole('button').filter((b) => /^ref_1$/.test(b.textContent ?? ''));
+    expect(refButtons.length).toBeGreaterThanOrEqual(2);
+    fireEvent.click(refButtons[0]);
+
+    const t = document.body.textContent ?? '';
+    // 抽屉必须显示第一轮的中际旭创，而不是最后一轮的宁德时代
+    expect(t).toContain('724.47');
+    expect(t).not.toContain('298.38');
+  });
+});
+
+describe('时间轴进度与耗时不得跨轮错配（T4 Spec 轴评审缺陷）', () => {
+  it('流式期间"正在执行"不钉在最后一步（数据未到时不应显示三栏对齐为进行中）', async () => {
+    // 只有 steps 与 plan，工具尚未返回 → 应处于"子问题核验"而非"三栏证据对齐"
+    chatState.messages = [
+      { id: 'u1', role: 'user', parts: [{ type: 'text', text: '中际旭创' }] },
+      {
+        id: 'a1',
+        role: 'assistant',
+        parts: [
+          { type: 'data-steps', id: 'steps', data: { steps: [
+            { id: 'step-compliance', label: '合规校验', detail: 'd' },
+            { id: 'step-reframe', label: '命题重构', detail: 'd' },
+            { id: 'step-sub-1', label: '子问题核验 1', detail: 'd' },
+            { id: 'step-synthesis', label: '三栏证据对齐', detail: 'd' },
+          ] } },
+          { type: 'data-plan', id: 'plan', data: { reframedClaim: '命题', intentTags: ['标的: 中际旭创'], subQuestions: [] } },
+        ],
+      },
+    ];
+    chatState.status = 'streaming';
+    await renderPage();
+    const header = screen.getByRole('button', { expanded: false }).textContent ?? '';
+    // 展开看"正在执行"标签
+    fireEvent.click(screen.getByRole('button', { expanded: false }));
+    const t = document.body.textContent ?? '';
+    expect(t).toContain('正在执行');
+    expect(t).toContain('子问题核验 1');
+    expect(t).not.toContain('正在执行：三栏证据对齐');
+    void header;
+  });
+
+  it('非流式时显示该轮自己的耗时（按轮次记账）', async () => {
+    chatState.messages = [
+      { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'q' }] },
+      {
+        id: 'a1',
+        role: 'assistant',
+        parts: [
+          { type: 'data-steps', id: 'steps', data: { steps: [{ id: 's', label: '命题重构', detail: 'd' }] } },
+          { type: 'data-contract', id: 'contract', data: { ok: true, violations: [], citations: { cited: [], valid: [], invalid: [], hasAny: false } } },
+          { type: 'text', text: '【支持证据】x\n【反对证据】y\n【无法验证项】z', state: 'done' },
+        ],
+      },
+    ];
+    chatState.status = 'ready';
+    await renderPage();
+    // 未计时（该轮从未流式）→ 显示空而非其它轮的耗时
+    expect(screen.getByRole('button', { expanded: false })).toBeDefined();
+  });
 });

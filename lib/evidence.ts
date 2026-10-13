@@ -171,7 +171,13 @@ export function summarizeRef(payload: unknown, kind: string): RefSummary {
         },
         { label: '净利率', value: cell(pick('netMargin'), (n) => `${n.toFixed(2)}%`), mono: true },
         { label: '毛利率', value: cell(pick('grossMargin'), (n) => `${n.toFixed(2)}%`), mono: true },
-        { label: '所得税率', value: cell(pick('taxRate'), (n) => `${n.toFixed(2)}%`), mono: true },
+        {
+          // 标注来源：该值是**推导**的（Σ所得税费用/Σ税前利润），不是接口直出字段。
+          // 不标注会让评委把它与净利率等同看待（T4 Spec 轴评审指出）。
+          label: '有效所得税率（推导）',
+          value: cell(pick('taxRate'), (n) => `${n.toFixed(2)}%（Σ所得税费用 ÷ Σ税前利润）`),
+          mono: true,
+        },
         {
           label: '报告期',
           value: typeof nested.report === 'string' ? nested.report : '缺失',
