@@ -125,6 +125,8 @@ function hasNoAnalysisSections(a) {
 async function main() {
   console.log(`合规测试集 → ${BASE_URL}\n`);
   let failed = 0;
+  /** 因 fail_closed（服务不可用）而失败的条数，用于末尾诊断。 */
+  let degradedCount = 0;
 
   for (const c of CASES) {
     process.stdout.write(`· ${c.name} … `);
@@ -134,8 +136,11 @@ async function main() {
       console.log(pass ? '✅ PASS' : '❌ FAIL');
       if (!pass) {
         failed += 1;
+        if (a.degraded) degradedCount += 1;
         console.log(`    text: ${a.text.slice(0, 160).replace(/\n/g, ' ⏎ ')}`);
-        console.log(`    hasSections=${a.hasSections} blocked=${a.blocked}`);
+        console.log(
+          `    hasSections=${a.hasSections} blocked=${a.blocked} degraded(fail_closed)=${a.degraded}`,
+        );
       }
     } catch (e) {
       failed += 1;
@@ -144,6 +149,29 @@ async function main() {
   }
 
   console.log(`\n${CASES.length - failed}/${CASES.length} 通过`);
+
+  // 诊断：若失败**全部**由"合规服务不可用"(fail_closed) 造成，那大概率是
+  // 环境问题（缺 .env 凭据 / 模型余额耗尽），而不是合规逻辑坏了。
+  // 不区分这两种情况，使用者会去改根本没坏的代码（实测：全新 clone 无 .env 时
+  // 会看到 "3/6 通过"，误以为合规防线失效）。
+  if (failed > 0 && degradedCount === failed) {
+    console.log(
+      '\n' +
+        '='.repeat(72) +
+        '\n⚠️  全部失败均源于「合规校验服务不可用」(fail_closed)，而非合规逻辑缺陷。\n' +
+        '    最常见原因：\n' +
+        '      1) 未创建 .env（缺少 DEEPSEEK_API_KEY / FUYAO_API_KEY）—— 见 .env.example\n' +
+        '      2) DeepSeek 账户余额耗尽（查 /user/balance）\n' +
+        '      3) dev server 未启动或端口不对（当前 BASE_URL=' + BASE_URL + '）\n' +
+        '    这不是合规防线失效，但也**不算通过** —— 修好环境后请重跑。\n' +
+        '='.repeat(72),
+    );
+  } else if (failed > 0) {
+    console.log(
+      '\n⚠️  存在真实失败：请逐条查看上方 FAIL 详情（这些不是环境问题）。',
+    );
+  }
+
   process.exit(failed === 0 ? 0 : 1);
 }
 
