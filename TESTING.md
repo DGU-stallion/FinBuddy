@@ -37,7 +37,7 @@ npm run test:compliance   # 合规测试集（需要 dev server）
 
 | 命令 | 结果 |
 |---|---|
-| `npx vitest run` | **Test Files 46 passed (46)；Tests 557 passed (557)；0 skipped** |
+| `npx vitest run` | **Test Files 46 passed (46)；Tests 558 passed (558)；0 skipped** |
 | `npx tsc --noEmit` | 干净（无输出） |
 | `npm run build` | ✓ Compiled successfully |
 | `npm run lint` | ✓ No ESLint warnings or errors |
@@ -89,7 +89,7 @@ npm run test:compliance   # 合规测试集（需要 dev server）
 | 真实输出回归 | `tests/fixtures/*` + `tests/real-*.test.ts`、`tests/fallback-chain.test.ts`、`tests/vacuum-chain.test.ts` | 30 项 | 冻结真实输出，**防止解析逻辑退化** | 新场景（fixture 是历史快照） |
 | 交付守卫 | `tests/deliverable-docs.test.ts`、`tests/demo-script-check.test.tsx` | 13 项 | 文档声称的东西真的存在（脚本可跑、未部署就不预填已完成） | 文档措辞是否夸大（人判断） |
 
-总计：**46 个文件 / 557 项**。
+总计：**46 个文件 / 558 项**。
 
 ### 测试文件清单（实际用例数，取自 2026-10-13 最终一次 `vitest run`）
 
@@ -210,16 +210,32 @@ expect(flat).not.toContain('【支持证据】营收与净利率保持稳定。'
 ```bash
 npx next dev                                  # 终端 A
 node scripts/compliance-suite.mjs             # 终端 B：合规测试集，期望 6/6
+node scripts/single-render-check.mjs          # 真实浏览器：一次提问必须只渲染一轮
+node scripts/ime-submit-check.mjs             # 真实浏览器：输入法选词的 Enter 不得触发提交
 node scripts/t4-e2e.mjs --live                # 真机 SSE → 前端视图模型
 node scripts/t4-e2e.mjs /tmp/real.sse         # 或喂一份已落盘的 SSE
 npx tsx scripts/t5-verify.mts                 # 两个预置案例的测算参数注入
 ```
 
+**两个浏览器验证脚本的存在理由**（都是"单测看不见"的缺陷，且均已做变异测试）：
+
+- `single-render-check.mjs` —— 用户三次报告"对话还是出现两次"。真因是路由把
+  `data-*` 写在 `start` **之前**，导致 AI SDK 开出**两条** assistant 消息。
+  协议层由 `tests/route-offline.test.ts` 锁定；但"渲染成两轮"是它的后果，
+  必须在真实浏览器里**数轮次**才算验证到用户看到的东西。
+  注意：回放流的 `start` **必须带 `messageId`**，否则脚本会失去牙齿（实测）。
+- `ime-submit-check.mjs` —— 输入法打字时按 Enter 选词被当成提交，
+  把未打完的拼音发出去。Playwright 的 `fill()` 绕过输入法，测不出这条；
+  必须用 CDP 的 `Input.imeSetComposition` 模拟真实组词。
+
 真机确认过的行为（2026-10-13）：
 
 - 中际旭创一轮：**4 条存证**（snapshot/announcements/financials）、契约 `ok`、
   **21 个角标全部可溯源**；把其中一个篡改为 `ref_99` 后**立即被判失效**。
-- 测算参数注入：`baseRevenue = 1245.19 亿（TTM）`、`netMargin = 35.27%`、`taxRate = 15%`。
+- 测算参数注入：`baseRevenue = 1245.19 亿（TTM）`、`netMargin = 35.27%`、
+  `taxRate = 14.68%`（**由 Σ所得税费用 ÷ Σ税前利润推导**，非硬编码 15%）。
+  ⚠️ 本行此前写的是 `taxRate = 15%`，是**修复前**的错算法残留，已更正
+  （那时硬编码 15%，与实际推导值不符；见缺陷表 #11）。
 - 时间轴 7 步；追问 3 条且真"递进"（行业需求 → 光芯片成本 → 同行对比，非模板）。
 - 宁德时代一轮命中**真实信息真空期**：模型在【无法验证项】写出
   「**不得推测** —— 无法据此判定传闻为真，也无法据此判定传闻为假」。
@@ -231,7 +247,7 @@ npx tsx scripts/t5-verify.mts                 # 两个预置案例的测算参�
 诚实列出，避免读者高估覆盖：
 
 - [x] ~~**真机集成测试最近一次为 skipped**（DeepSeek 余额耗尽）~~ → **已重跑并通过**
-      （2026-10-13）：`npx vitest run` → **46 files / 557 passed / 0 skipped**；
+      （2026-10-13）：`npx vitest run` → **46 files / 558 passed / 0 skipped**；
       `node scripts/compliance-suite.mjs` → **6/6, exit 0**。
 - [ ] **响应式布局仅验证 1280px+ 桌面端**（移动端为 spec 明确的 Out of Scope）。
 - [ ] **浏览器真实渲染未做视觉回归测试**（无 Playwright/截图对比）。
