@@ -251,6 +251,11 @@ export async function POST(req: NextRequest) {
     const notice = complianceNotice(layer === 'fail_closed' ? 'fail_closed' : 'keyword');
     const stream = createUIMessageStream({
       execute: ({ writer }) => {
+        // 与主分析分支保持同一不变量：**start 必须第一个写**
+        // （真缺陷 #24：data-* 写在 start 之前会让客户端开出两条 assistant 消息）。
+        // 此分支原先没有 start（靠 data-compliance 隐式开消息）—— 实测能渲染，
+        // 但"能跑"来自一个未被断言的巧合，一旦后续改动引入 start 就会重复渲染。
+        writer.write({ type: 'start' });
         // 机器可读信号：合规测试集与 T4 前端据此区分"真拦截"与"服务降级兜底"，
         // 不靠嗅探文案字符串（改文案会静默失效 —— code-review Spec 轴发现）。
         writer.write({ type: 'data-compliance', id: PART.compliance, data: { layer } });

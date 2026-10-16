@@ -242,6 +242,16 @@ describe('离线端到端：路由编排（mock 模型）', () => {
     expect(r.order).toEqual(['compliance']);
     // 柔性引导，不是粗暴拒答
     expect(r.text).toContain('不提供任何投资建议');
+
+    // 与分析分支共用同一不变量：start 必须第一个写。
+    // 此分支原先**完全不写 start**（靠 data-* 隐式开消息）—— 实测能渲染，
+    // 但那是个未被断言的巧合；一旦此处也被引入 start 就会重现缺陷 #24
+    // （客户端开出两条 assistant 消息 → 同一提问渲染两轮）。
+    expect(
+      r.chunkTypes[0],
+      '合规分支也不得把 data-* 写在 start 之前（缺陷 #24）',
+    ).toBe('start');
+    expect(r.chunkTypes.filter((t) => t === 'start').length).toBe(1);
   });
 
   it('合规：意图层命中（关键词未拦）时 layer=intent', async () => {
