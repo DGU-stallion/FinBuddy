@@ -153,6 +153,19 @@ export interface FinancialsResult extends FinancialsPayload {
   netMargin?: number;
   grossMargin?: number;
   taxRate?: number;
+  /**
+   * TTM 净利润（与 baseRevenue 同期同口径）。
+   * 供对账器校验「净利率 ≈ 净利润 ÷ 营收」这条内部一致性。
+   */
+  netProfitTTM?: number;
+  /**
+   * 实际参与求和的逐期营收（带财年/季度标签），供对账器判定口径形态。
+   *
+   * 为什么必须暴露到这一层：口径错误无法从**求和结果**看出
+   * （一个错 3 倍的数依然是个合法的有限数），只能从**结构**看出；
+   * 而结构（年内递增 + 年界骤降）必须依赖标签才能识别。
+   */
+  revenueSeries?: Array<{ year?: number; period?: string; revenue: number }>;
 }
 
 export async function lookupFinancialReport(
@@ -251,8 +264,11 @@ export async function lookupFinancialReport(
     revenueBasis: ttm.basis,
     netMargin,
     grossMargin,
-    // 推导失败则保持 undefined，由 format/UI 显式声明"缺失"并拒绝测算
+    // 推导失败则保持 undefined，由 format/UI 显式声明“缺失”并拒绝测算
     taxRate: tax?.pct,
+    netProfitTTM: ttm.netProfitTTM,
+    // 逐期营收交给对账器判定口径 —— 求和结果本身看不出口径错误（见 lib/reconcile.ts）
+    revenueSeries: ttm.periods,
     data: {
       thscode,
       report,

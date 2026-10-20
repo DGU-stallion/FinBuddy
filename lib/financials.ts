@@ -22,6 +22,17 @@ export interface TTMResult {
   baseRevenue: number;
   netProfitTTM: number;
   basis: RevenueBasis;
+  /**
+   * 实际参与本轮**求和**的逐期营收（原始值 + 财年/季度标签）。
+   *
+   * 为什么必须暴露，而且**必须带标签**：
+   * 口径错误（年内累计被当成单季相加）只能在"年内递增 + 年界骤降"
+   * 这个结构上识别，而这两条都需要 `fiscal_year` / `fiscal_period`。
+   * 真机自测证实：丢掉标签的纯数值启发式会直接漏报
+   *（宁德时代 2769/1291/4237/2830 的差分比高达 24 倍，不呈等差）。
+   * 供 `lib/reconcile.ts` 对账使用。
+   */
+  periods: Array<{ year?: number; period?: string; revenue: number }>;
 }
 
 /** 判断一期是否有可用的营收数据。 */
@@ -37,7 +48,7 @@ export function sumTTM(periods: QuarterlyIncome[]): TTMResult {
   const valid = periods.filter(hasRevenue);
 
   if (valid.length === 0) {
-    return { baseRevenue: 0, netProfitTTM: 0, basis: 'missing' };
+    return { baseRevenue: 0, netProfitTTM: 0, basis: 'missing', periods: [] };
   }
 
   if (valid.length >= 4) {
@@ -46,6 +57,12 @@ export function sumTTM(periods: QuarterlyIncome[]): TTMResult {
       baseRevenue: last4.reduce((s, p) => s + p.operatingIncome, 0),
       netProfitTTM: last4.reduce((s, p) => s + p.netProfit, 0),
       basis: 'TTM',
+      // 带标签：对账器靠"年内递增 + 年界骤降"识别累计口径（见 TTMResult 注释）
+      periods: last4.map((p) => ({
+        year: p.fiscalYear,
+        period: p.fiscalPeriod,
+        revenue: p.operatingIncome,
+      })),
     };
   }
 
@@ -54,6 +71,11 @@ export function sumTTM(periods: QuarterlyIncome[]): TTMResult {
     baseRevenue: latest.operatingIncome * 4,
     netProfitTTM: latest.netProfit * 4,
     basis: 'latest_quarter_x4',
+    periods: valid.map((p) => ({
+      year: p.fiscalYear,
+      period: p.fiscalPeriod,
+      revenue: p.operatingIncome,
+    })),
   };
 }
 

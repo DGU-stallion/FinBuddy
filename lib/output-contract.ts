@@ -61,7 +61,38 @@ export interface OutputContext {
   fallbackRefs: FallbackRef[];
   /** 本轮落入信息真空期的子问题（需在【无法验证项】中被点名）。 */
   vacuumSubQuestions: VacuumSubQuestion[];
+  /**
+   * 本轮数值对账的结论（来自 lib/reconcile.ts）。
+   *
+   * 为什么放在契约层：对账发生在**证据装配**时（模型动笔之前），
+   * 而“拒绝交付”是**成稿**时的决策。二者需在这里汇合 ——
+   * 否则对账器就只是又一个“只报告、没人管”的模块。
+   */
+  reconciliation?: ReconciliationFinding[];
 }
+
+/**
+ * 对账结论的契约层视图。
+ *
+ * 刻意**不** import `lib/reconcile.ts` 的类型：契约层只关心
+ * “有没有被拦下的结论”，不应对对账器的内部结构形成依赖
+ * （对账规则会演进，契约的形状不应随之漂移）。
+ */
+export interface ReconciliationFinding {
+  code: string;
+  severity: 'block' | 'warn' | 'info';
+  claim: string;
+  detail: string;
+}
+
+/**
+ * 正文中声明“某项数据未通过对账、不得采信”的措辞特征。
+ *
+ * 用于反向检查：被对账拦掉的数据，**不得**被正文当成已验证事实陈述。
+ * 这个方向比“缺少声明”更危险 —— 前面几项是“该说的没说”，
+ * 这一项是“把不可信的输入说成可信的”。
+ */
+const RECONCILIATION_MARKERS = ['对账', '未通过', '口径不符', '口径存疑', '不可采信', '数据异常'];
 
 export type ViolationCode =
   | 'missing_section'
@@ -70,7 +101,9 @@ export type ViolationCode =
   | 'fabricated_citation'
   | 'no_citations'
   | 'missing_fallback_disclosure'
-  | 'missing_vacuum_disclosure';
+  | 'missing_vacuum_disclosure'
+  | 'data_reconciliation_failed'
+  | 'reconciled_data_asserted';
 
 export interface Violation {
   code: ViolationCode;
@@ -172,7 +205,35 @@ export function validateAnalysisOutput(text: string, ctx: OutputContext): Output
     }
   }
 
+  // 6. 数值对账：**block 级结论即违规**（这一项让对账真正具备了强制力）。
+  //
+  // 为什么只有 block：warn 是“可疑，需确认”，把它升级为拒付会把闸门变成噪音，
+  // 而一旦用户学会忽略告警，真正致命的 block 也会被一并忽略。
+  const blocked = (ctx.reconciliation ?? []).filter((f) => f.severity === 'block');
+  for (const f of blocked) {
+    violations.push({
+      code: 'data_reconciliation_failed',
+      detail: `${f.code}：${f.claim} —— ${f.detail}`,
+    });
+  }
+
+  // 6b. 反向检查：被对账拦掉的数据，不得被正文当成已验证事实陈述。
+  // 只在下游真的产出正文时才检查（正文为空说明流已中断，由其他规则处理）。
+  if (blocked.length > 0 && text.trim() !== '' && !hasReconciliationDisclosure(text)) {
+    violations.push({
+      code: 'reconciled_data_asserted',
+      detail:
+        `本轮有 ${blocked.length} 项数据未通过数值对账（${blocked.map((f) => f.code).join('、')}），` +
+        `但正文未声明该数据不可采信。被拦下的数据必须显式归入【无法验证项】，不得作为事实陈述。`,
+    });
+  }
+
   return { ok: violations.length === 0, violations };
+}
+
+/** 正文是否声明了“某项数据未通过对账”。 */
+function hasReconciliationDisclosure(text: string): boolean {
+  return RECONCILIATION_MARKERS.some((m) => text.includes(m));
 }
 
 /**

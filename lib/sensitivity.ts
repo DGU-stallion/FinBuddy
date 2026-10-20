@@ -156,6 +156,17 @@ export function extractSensitivityParams(
     const p = asObjForParams(r.payload);
     if (p === null) continue;
 
+    /**
+     * 被对账拦下的数据**不得**注入测算卡。
+     *
+     * 为什么必须在这里再拦一道（工具层已经拦过一次）：
+     * 滑块的数据源是 refs 的 payload，而不是工具返回值。
+     * 只要 payload 还在，一个错 3 倍的基准营收就会被滑块安静地
+     * 算成一张看起来很精确的图 —— 而这正是本次缺陷的形态。
+     * “拒绝”在每一道取数口都要重新执行，不能只做一次。
+     */
+    if (isReconciliationBlocked(p.reconciliation)) continue;
+
     const nested = asObjForParams(p.data) ?? {};
     const pick = (k: string): unknown => p[k] ?? nested[k];
 
@@ -181,6 +192,22 @@ export function extractSensitivityParams(
     };
   }
   return null;
+}
+
+/**
+ * payload 上是否携带着 block 级对账结论。
+ *
+ * 形状宽容（只看 `severity === 'block'`）：对账结论由 app/api/chat/route.ts
+ * 挂在 payload 上，本模块不应对其完整结构形成依赖。
+ */
+function isReconciliationBlocked(v: unknown): boolean {
+  if (!Array.isArray(v)) return false;
+  return v.some(
+    (f) =>
+      typeof f === 'object' &&
+      f !== null &&
+      (f as { severity?: unknown }).severity === 'block',
+  );
 }
 
 function asObjForParams(v: unknown): Record<string, unknown> | null {

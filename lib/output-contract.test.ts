@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { validateAnalysisOutput, extractSection, type OutputContext } from './output-contract';
+import {
+  validateAnalysisOutput,
+  extractSection,
+  type OutputContext,
+  type ReconciliationFinding,
+} from './output-contract';
 
 /**
  * Seam 5: 输出契约校验（票 T3「强制三栏输出」「无买卖结论」「降级与真空期声明」）
@@ -220,5 +225,74 @@ X 公司业绩强劲。
       const r = validateAnalysisOutput(evasive, ctx({ vacuumSubQuestions: [KEYWORD_ITEM] }));
       expect(r.violations.map((v) => v.code)).toContain('missing_vacuum_disclosure');
     });
+  });
+});
+
+/**
+ * 数值对账接入契约层（新增）
+ *
+ * 抓到：对账器报出的 block 级结论未被契约层认作违规、或正文把被拦数据当事实陈述。
+ * 漏掉：对账规则本身的正确性（由 lib/reconcile.test.ts 负责）。
+ *
+ * 关键红线：对账的 block 必须**真的能拦住交付** ——
+ * 否则对账器就只是又一个"只报告、没人管"的模块，
+ * 而这正是本次重构要消灭的形态。
+ */
+describe('数值对账结论接入契约', () => {
+  const BLOCK: ReconciliationFinding = {
+    code: 'cumulative_caliber_suspected',
+    severity: 'block',
+    claim: '基准营收是"最近 n 期之和"',
+    detail: '逐期营收符合年内累计特征，求和所得 9250 亿元不得作为基准营收。',
+  };
+  const WARN: ReconciliationFinding = {
+    code: 'unlabeled_caliber',
+    severity: 'warn',
+    claim: '基准营收已给出且标注了口径',
+    detail: '未标注口径。',
+  };
+
+  it('block 级对账结论 → 违规 data_reconciliation_failed', () => {
+    const r = validateAnalysisOutput(CONFORMING, ctx({ reconciliation: [BLOCK] }));
+    const codes = r.violations.map((v) => v.code);
+    expect(codes).toContain('data_reconciliation_failed');
+    expect(r.ok).toBe(false);
+  });
+
+  it('违规详情携带对账 code 与具体数字（可复盘）', () => {
+    const r = validateAnalysisOutput(CONFORMING, ctx({ reconciliation: [BLOCK] }));
+    const v = r.violations.find((x) => x.code === 'data_reconciliation_failed')!;
+    expect(v.detail).toContain('cumulative_caliber_suspected');
+    expect(v.detail).toContain('9250 亿元');
+  });
+
+  it('warn 级不阻断交付（否则闸门变噪音，block 会被一并忽略）', () => {
+    const r = validateAnalysisOutput(CONFORMING, ctx({ reconciliation: [WARN] }));
+    expect(r.violations.map((v) => v.code)).not.toContain('data_reconciliation_failed');
+    expect(r.ok).toBe(true);
+  });
+
+  it('被拦下的数据未在正文声明不可采信 → 额外报 reconciled_data_asserted', () => {
+    // CONFORMING 正文把 1245.19 亿当作正常事实陈述，未提及对账失败
+    const r = validateAnalysisOutput(CONFORMING, ctx({ reconciliation: [BLOCK] }));
+    expect(r.violations.map((v) => v.code)).toContain('reconciled_data_asserted');
+  });
+
+  it('正文已声明对账失败 → 只报数据本身的问题，不报"未声明"', () => {
+    const disclosed = CONFORMING.replace(
+      '【无法验证项】',
+      '【无法验证项】\n- 本轮财务参数未通过对账（口径不符），不可采信。',
+    );
+    const r = validateAnalysisOutput(disclosed, ctx({ reconciliation: [BLOCK] }));
+    const codes = r.violations.map((v) => v.code);
+    expect(codes).toContain('data_reconciliation_failed');
+    expect(codes).not.toContain('reconciled_data_asserted');
+  });
+
+  it('未提供 reconciliation 时不产生任何对账相关违规（向后兼容）', () => {
+    const r = validateAnalysisOutput(CONFORMING, ctx());
+    const codes = r.violations.map((v) => v.code);
+    expect(codes).not.toContain('data_reconciliation_failed');
+    expect(codes).not.toContain('reconciled_data_asserted');
   });
 });

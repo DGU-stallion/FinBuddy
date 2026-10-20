@@ -36,6 +36,13 @@ import { validateAnalysisOutput } from '@/lib/output-contract';
 import { checkCitations } from '@/lib/citations';
 import { buildOrchestrationSteps, refKind, extractSubjectHint } from '@/lib/orchestration';
 import { buildContextSummary, selectCurrentTurn } from '@/lib/context-summary';
+import {
+  reconcileFinancials,
+  reconcileSnapshot,
+  runLedger,
+  describeFindings,
+  type LedgerEntry,
+} from '@/lib/reconcile';
 
 // T4 前端消费的 data part 名（route 文件只得导出 HTTP 方法，故不 export 此常量）
 const PART = {
@@ -283,6 +290,39 @@ export async function POST(req: NextRequest) {
   const fallbackRefs: Array<{ refId: string; asOf: number; note?: string }> = [];
   const vacuumSubQuestions: Array<{ question: string; keyword?: string }> = [];
 
+  /**
+   * 数值对账（lib/reconcile.ts）在本轮的累计结论。
+   *
+   * 为什么在**证据层**就对账，而不等正文写完：
+   * 宁德时代那个缺陷里，错误的数字在模型写出任何一个字**之前**就已经注定了。
+   * 等成稿再查，等于让一个错 3 倍的输入先被渲染出来、再回头标记它 ——
+   * 而对账器知道得比那早得多。
+   *
+   * 同时对账结论也会注入工具返回值，让模型在**看到**数据时就被告知
+   * “这批数据不可用，请归入无法验证项”，而不是写成正文后被拦下。
+   */
+  const ledgerEntries: LedgerEntry[] = [];
+
+  /**
+   * 登记一条对账结论，并返回要注入给模型的告警文本（无结论时为空串）。
+   *
+   * 返回文本而非只 push：模型需要在**看到**数据的那一刻就知道它不可用，
+   * 否则它会先写成正文、再被契约层拦下 —— 那一轮就白跑了。
+   */
+  function recordLedger(entry: LedgerEntry, label: string): string {
+    ledgerEntries.push(entry);
+    if (entry.findings.every((f) => f.severity === 'info')) return '';
+    // 注入给模型的告警必须说清原因（只给 ok:false 会逼模型自由发挥）
+    const header = entry.findings.some((f) => f.severity === 'block')
+      ? `\n\n⛔ 数值对账未通过（${label}）：这批数据**不得**作为事实陈述，必须归入【无法验证项】并说明原因：`
+      : `\n\n⚠️ 数值对账存疑（${label}）：下列数据使用前需说明局限：`;
+    return header + '\n' + describeFindings(entry.findings);
+  }
+
+  /** 该条目是否含 block 级结论（即：这批数据不得用于计算）。 */
+  const isBlocked = (entry: LedgerEntry): boolean =>
+    entry.findings.some((f) => f.severity === 'block');
+
   const result = streamText({
     model: deepseek(MODEL_ID),
     system: buildSystemPrompt(plan, priorSummary?.toPromptText()),
@@ -313,7 +353,16 @@ export async function POST(req: NextRequest) {
           const refId = refs.next();
           try {
             const payload = await lookupStockSnapshot(resolved.thscode, refId);
-            refs.register(refId, payload);
+            // 行情层对账（估值恒等式 / 价格合法性），结论一并回给模型
+            const entry = reconcileSnapshot({
+              refId,
+              lastPrice: payload.data.last_price,
+              peTTM: payload.data.pe_ttm,
+              pbMRQ: payload.data.pb_mrq,
+            });
+            const reconciliation = recordLedger(entry, '行情快照');
+            // 与财务分支一致：对账结论必须落在 payload 上，否则前端取不到
+            refs.register(refId, { ...payload, reconciliation: entry.findings });
             if (payload.isFallback) {
               fallbackRefs.push({ refId, asOf: payload.asOf, note: payload.fallbackNote });
             }
@@ -322,7 +371,7 @@ export async function POST(req: NextRequest) {
               refId,
               thscode: resolved.thscode,
               name: resolved.name,
-              formatted: formatSnapshotForLLM(payload),
+              formatted: formatSnapshotForLLM(payload) + reconciliation,
             };
           } catch (e) {
             return { ok: false, reason: 'upstream_error', message: `行情获取失败：${(e as Error).message}` };
@@ -344,20 +393,46 @@ export async function POST(req: NextRequest) {
           const refId = refs.next();
           try {
             const payload = await lookupFinancialReport(resolved.thscode, refId);
-            refs.register(refId, payload);
+            // 财务层的对账是本轮最要紧的一道：宁德时代那个错一个数量级的
+            // 基准营收，就是在这里（或这里之后）被漏过去的。
+            const entry = reconcileFinancials({
+              refId,
+              baseRevenue: payload.baseRevenue,
+              revenueBasis: payload.revenueBasis,
+              netMargin: payload.netMargin,
+              grossMargin: payload.grossMargin,
+              taxRate: payload.taxRate,
+              netProfitTTM: payload.netProfitTTM,
+              revenueSeries: payload.revenueSeries ?? [],
+            });
+            const blocked = isBlocked(entry);
+            const reconciliation = recordLedger(entry, '财务参数');
+            // 把对账结论挂到存证 payload 上。**这是闸门真正生效的地方**：
+            // 前端滑块与多轮摘要都从 refs 的 payload 取数，
+            // 只拦工具返回值而不拦 payload，等于闸门形同虚设。
+            const stamped = { ...payload, reconciliation: entry.findings, blocked };
+            refs.register(refId, stamped);
+            if (payload.isFallback) {
+              fallbackRefs.push({ refId, asOf: payload.asOf, note: payload.fallbackNote });
+            }
             return {
               ok: true,
               refId,
               thscode: resolved.thscode,
               name: resolved.name,
-              formatted: formatFinancialsForLLM(payload),
-              sensitivityParams: {
-                baseRevenue: payload.baseRevenue,
-                revenueBasis: payload.revenueBasis,
-                netMargin: payload.netMargin,
-                grossMargin: payload.grossMargin,
-                taxRate: payload.taxRate,
-              },
+              blocked,
+              formatted: formatFinancialsForLLM(payload) + reconciliation,
+              // 测算参数只在**未被拦下**时提供 —— 把一个未通过对账的数字
+              // 交给滑块/模型，它会安静地算出一个看起来很精确的数。
+              sensitivityParams: blocked
+                ? undefined
+                : {
+                    baseRevenue: payload.baseRevenue,
+                    revenueBasis: payload.revenueBasis,
+                    netMargin: payload.netMargin,
+                    grossMargin: payload.grossMargin,
+                    taxRate: payload.taxRate,
+                  },
             };
           } catch (e) {
             return { ok: false, reason: 'upstream_error', message: `财务数据获取失败：${(e as Error).message}` };
@@ -462,10 +537,13 @@ export async function POST(req: NextRequest) {
       });
 
       // 契约校验：违规清单交给前端（T4 角标校验/降级角标）与审计
+      const ledger = runLedger(ledgerEntries);
       const check = validateAnalysisOutput(text, {
         refIds: refList.map((r) => r.refId),
         fallbackRefs,
         vacuumSubQuestions,
+        // 数值对账结论汇入契约层（block 级即违规，见 lib/output-contract.ts）
+        reconciliation: ledger.findings,
       });
       writer.write({
         type: 'data-contract',
@@ -474,6 +552,7 @@ export async function POST(req: NextRequest) {
           ok: check.ok,
           violations: check.violations,
           citations: checkCitations(text, refList.map((r) => r.refId)),
+          reconciliation: ledger.findings,
         },
       });
 
